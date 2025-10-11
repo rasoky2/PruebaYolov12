@@ -1,0 +1,131 @@
+{
+    "filters": {
+        "nir": {
+            "name": "NIR Avanzado",
+            "description": "Infrarrojo cercano con análisis de textura",
+            "is_favorite": false,
+            "category": "básico",
+            "recommended_for": "análisis general de textura"
+        },
+        "spectral": {
+            "name": "Spectral",
+            "description": "Análisis multibanda y espectral",
+            "is_favorite": false,
+            "category": "básico",
+            "recommended_for": "contaminación química"
+        },
+        "texture": {
+            "name": "Textura",
+            "description": "Análisis avanzado de patrones",
+            "is_favorite": true,
+            "category": "básico",
+            "recommended_for": "patrones irregulares"
+        },
+        "uv": {
+            "name": "UV Simulado",
+            "description": "Simulación de fluorescencia UV",
+            "is_favorite": false,
+            "category": "básico",
+            "recommended_for": "demostración"
+        },
+        "mold": {
+            "name": "Moho",
+            "description": "Detección de manchas y colores de moho",
+            "is_favorite": false,
+            "category": "hongos",
+            "recommended_for": "detección de moho"
+        },
+        "rot": {
+            "name": "Podredumbre",
+            "description": "Detección de vencimiento y deterioro",
+            "is_favorite": false,
+            "category": "hongos",
+            "recommended_for": "detección de vencimiento"
+        },
+        "fungal": {
+            "name": "Hongos",
+            "description": "Esporas y micelio",
+            "is_favorite": false,
+            "category": "hongos",
+            "recommended_for": "detección de hongos"
+        },
+        "mycotoxin": {
+            "name": "Micotoxinas",
+            "description": "Detección de toxinas fúngicas",
+            "is_favorite": false,
+            "category": "avanzado",
+            "recommended_for": "análisis de toxinas"
+        },
+        "aflatoxin": {
+            "name": "Aflatoxinas",
+            "description": "Detección de aflatoxinas con fluorescencia",
+            "is_favorite": false,
+            "category": "avanzado",
+            "recommended_for": "análisis de aflatoxinas"
+        },
+        "discoloration": {
+            "name": "Decoloración",
+            "description": "Patrones de decoloración fúngica",
+            "is_favorite": false,
+            "category": "avanzado",
+            "recommended_for": "patrones de decoloración"
+        },
+        "mold_texture": {
+            "name": "Textura Moho",
+            "description": "Texturas específicas de moho",
+            "is_favorite": true,
+            "category": "avanzado",
+            "recommended_for": "tipos específicos de moho"
+        },
+        "spore_detection": {
+            "name": "Esporas",
+            "description": "Detección de esporas fúngicas",
+            "is_favorite": false,
+            "category": "avanzado",
+            "recommended_for": "detección de esporas"
+        },
+        "brazil_chestnut": {
+            "name": "Castaña Brasileña",
+            "description": "Análisis especializado para castañas",
+            "is_favorite": false,
+            "category": "especializado",
+            "recommended_for": "análisis específico de castañas"
+        },
+        "pipeline": {
+            "name": "Pipeline Completo",
+            "description": "Análisis automático de contaminación fúngica",
+            "is_favorite": false,
+            "category": "pipeline",
+            "recommended_for": "análisis exhaustivo automático"
+        }
+    },
+    "settings": {
+        "default_favorite": "mold_texture",
+        "show_categories": true,
+        "show_recommendations": true,
+        "auto_select_favorite": false,
+        "pipeline_enabled": true,
+        "categories": {
+            "básico": {
+                "color": "#4CAF50",
+                "description": "Filtros básicos para análisis general"
+            },
+            "hongos": {
+                "color": "#FF9800", 
+                "description": "Filtros especializados en detección de hongos"
+            },
+            "avanzado": {
+                "color": "#2196F3",
+                "description": "Filtros avanzados para castañas brasileñas"
+            },
+            "especializado": {
+                "color": "#9C27B0",
+                "description": "Filtros específicos para castañas brasileñas"
+            },
+            "pipeline": {
+                "color": "#F44336",
+                "description": "Pipeline automatizado completo"
+            }
+        }
+    }
+}

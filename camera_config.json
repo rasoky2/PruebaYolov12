@@ -1,0 +1,29 @@
+{
+    "cameras": {
+        "0": {
+            "name": "Cámara Principal",
+            "description": "Webcam integrada o principal",
+            "is_favorite": false
+        },
+        "1": {
+            "name": "Cámara Externa",
+            "description": "Cámara USB externa",
+            "is_favorite": true
+        },
+        "2": {
+            "name": "Cámara Secundaria",
+            "description": "Segunda cámara disponible",
+            "is_favorite": false
+        },
+        "3": {
+            "name": "Cámara Virtual",
+            "description": "Cámara virtual o software",
+            "is_favorite": false
+        }
+    },
+    "settings": {
+        "default_favorite": true,
+        "show_descriptions": true,
+        "auto_select_favorite": false
+    }
+}
