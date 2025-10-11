@@ -27,9 +27,9 @@ class FilterManager:
             "spectral": self._simulate_advanced_spectral_filter,
             "texture": self._simulate_advanced_texture_filter,
             "contrast": self._simulate_contrast_enhanced_filter,
-            "mold": self._simulate_mold_detection_filter,
-            "rot": self._simulate_rot_detection_filter,
-            "fungal": self._simulate_fungal_detection_filter,
+            "mold": FilterManager._simulate_mold_detection_filter,
+            "rot": FilterManager._simulate_rot_detection_filter,
+            "fungal": FilterManager._simulate_fungal_detection_filter,
             # Nuevos filtros avanzados para castañas brasileñas
             "mycotoxin": self._simulate_mycotoxin_detection_filter,
             "aflatoxin": self._simulate_aflatoxin_detection_filter,
@@ -514,7 +514,8 @@ class FilterManager:
         
         return enhanced_img
     
-    def _simulate_mold_detection_filter(self, img: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _simulate_mold_detection_filter(img: np.ndarray) -> np.ndarray:
         """Filtro especializado para detección de moho en castañas"""
         if img is None:
             return img
@@ -552,7 +553,8 @@ class FilterManager:
         
         return mold_img
     
-    def _simulate_rot_detection_filter(self, img: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _simulate_rot_detection_filter(img: np.ndarray) -> np.ndarray:
         """Filtro para detección de podredumbre y vencimiento"""
         if img is None:
             return img
@@ -587,7 +589,8 @@ class FilterManager:
         
         return rot_img
     
-    def _simulate_fungal_detection_filter(self, img: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _simulate_fungal_detection_filter(img: np.ndarray) -> np.ndarray:
         """Filtro para detección de hongos y esporas"""
         if img is None:
             return img
