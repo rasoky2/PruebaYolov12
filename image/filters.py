@@ -9,6 +9,25 @@ import json
 import os
 from typing import Dict, Callable, Optional, Tuple
 
+# Imports para filtros técnicos avanzados
+try:
+    from skimage import filters as sk_filters
+    from skimage.feature import local_binary_pattern
+    from skimage.filters import gabor
+    from skimage.filters.rank import entropy
+    from skimage.morphology import disk
+    SKIMAGE_AVAILABLE = True
+except ImportError:
+    SKIMAGE_AVAILABLE = False
+    print("[WARNING] scikit-image no disponible. Algunos filtros técnicos no funcionarán.")
+
+try:
+    from scipy import ndimage
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    print("[WARNING] scipy no disponible. Algunas funciones avanzadas no funcionarán.")
+
 
 class FilterManager:
     """Gestor centralizado de filtros de imagen con soporte GPU/CPU"""
@@ -18,25 +37,33 @@ class FilterManager:
         self.filter_functions = self._initialize_filters()
         self.filter_config = self._load_filter_config()
         self.default_filter = self._get_default_filter()
+    
+    @staticmethod
+    def _safe_multiply_channel(img: np.ndarray, channel: int, factor: float) -> np.ndarray:
+        """Multiplicar un canal de imagen de forma segura"""
+        result = img.copy()
+        channel_data = result[:, :, channel].astype(np.float32)
+        channel_data = np.clip(channel_data * factor, 0, 255)
+        result[:, :, channel] = channel_data.astype(np.uint8)
+        return result
         
     def _initialize_filters(self) -> Dict[str, Callable]:
         """Inicializar diccionario de filtros disponibles"""
         return {
-            "uv": self._simulate_uv_effect,
-            "nir": self._simulate_advanced_nir_filter,
-            "spectral": self._simulate_advanced_spectral_filter,
-            "texture": self._simulate_advanced_texture_filter,
-            "contrast": self._simulate_contrast_enhanced_filter,
+            # Filtros básicos para grietas y hongos
+            "crack": self._simulate_crack_detection_filter,
             "mold": FilterManager._simulate_mold_detection_filter,
-            "rot": FilterManager._simulate_rot_detection_filter,
             "fungal": FilterManager._simulate_fungal_detection_filter,
-            # Nuevos filtros avanzados para castañas brasileñas
-            "mycotoxin": self._simulate_mycotoxin_detection_filter,
-            "aflatoxin": self._simulate_aflatoxin_detection_filter,
-            "discoloration": self._simulate_discoloration_detection_filter,
             "mold_texture": self._simulate_mold_texture_detection_filter,
             "spore_detection": self._simulate_spore_detection_filter,
-            "brazil_chestnut": self._simulate_brazil_chestnut_specialized_filter
+            "uv_fluorescence": self._simulate_uv_fluorescence_filter,
+            
+            # Filtros técnicos avanzados
+            "clahe_enhanced": self._clahe_enhanced_filter,
+            "gabor_texture": self._gabor_texture_filter,
+            "lbp_microtexture": self._lbp_microtexture_filter,
+            "color_segmentation": self._color_segmentation_filter,
+            "entropy_variance": self._entropy_variance_filter,
         }
     
     def apply_filter(self, img: np.ndarray, filter_type: str) -> Tuple[np.ndarray, str, str]:
@@ -55,9 +82,9 @@ class FilterManager:
             
         filter_func = self.filter_functions.get(filter_type)
         if not filter_func:
-            # Fallback a UV si el filtro no existe
-            filter_func = self.filter_functions["uv"]
-            filter_type = "uv"
+            # Fallback a filtro de hongos si el filtro solicitado no existe
+            filter_func = self.filter_functions.get("fungal")
+            filter_type = "fungal"
         
         try:
             processed_img = filter_func(img)
@@ -65,28 +92,24 @@ class FilterManager:
             filter_info = self.get_filter_info_from_config(filter_type)
             return processed_img, filter_info["name"], filter_info["description"]
         except Exception as e:
-            print(f"⚠️ Error aplicando filtro {filter_type}: {e}")
+            print(f"[WARNING] Error aplicando filtro {filter_type}: {e}")
             # Fallback a imagen original
             return img, "ERROR", f"Error: {str(e)}"
     
     def _get_filter_info(self, filter_type: str) -> Dict[str, str]:
         """Obtener información del filtro"""
         filter_info = {
-            "uv": {"name": "UV SIMULADO", "description": "(Fluorescencia)"},
-            "nir": {"name": "NIR AVANZADO", "description": "(Infrarrojo cercano)"},
-            "spectral": {"name": "ESPECTRAL", "description": "(Multibanda)"},
-            "texture": {"name": "TEXTURA", "description": "(Análisis de patrones)"},
-            "contrast": {"name": "CONTRASTE", "description": "(Realce visual)"},
+            "crack": {"name": "GRIETAS", "description": "(Detección de fracturas con polarización)"},
             "mold": {"name": "MOHO", "description": "(Detección de moho)"},
-            "rot": {"name": "PODREDUMBRE", "description": "(Detección de vencimiento)"},
             "fungal": {"name": "HONGOS", "description": "(Esporas y micelio)"},
-            # Información de filtros avanzados para castañas brasileñas
-            "mycotoxin": {"name": "MICOTOXINAS", "description": "(Detección de toxinas fúngicas)"},
-            "aflatoxin": {"name": "AFLATOXINAS", "description": "(Detección de aflatoxinas)"},
-            "discoloration": {"name": "DECOLORACIÓN", "description": "(Patrones de decoloración fúngica)"},
             "mold_texture": {"name": "TEXTURA MOHO", "description": "(Texturas específicas de moho)"},
             "spore_detection": {"name": "ESPORAS", "description": "(Detección de esporas fúngicas)"},
-            "brazil_chestnut": {"name": "CASTAÑA BRASILEÑA", "description": "(Análisis especializado)"}
+            "uv_fluorescence": {"name": "UV-A FLUORESCENCIA", "description": "(Simulación UV-A ~365nm para fluorescencia)"},
+            "clahe_enhanced": {"name": "CLAHE AVANZADO", "description": "(Contrast Limited Adaptive Histogram Equalization)"},
+            "gabor_texture": {"name": "GABOR TEXTURAS", "description": "(Filtros Gabor para texturas fúngicas)"},
+            "lbp_microtexture": {"name": "LBP MICROTEXTURAS", "description": "(Local Binary Patterns para microtexturas)"},
+            "color_segmentation": {"name": "SEGMENTACIÓN COLOR", "description": "(Detección de manchas por diferencias HSV/LAB)"},
+            "entropy_variance": {"name": "ENTROPÍA/VARIANZA", "description": "(Filtros de entropía y varianza local)"}
         }
         return filter_info.get(filter_type, {"name": "DESCONOCIDO", "description": ""})
     
@@ -176,6 +199,36 @@ class FilterManager:
         
         return favorites
     
+    def get_quick_key_mapping(self) -> Dict[str, str]:
+        """Obtener mapeo de teclas rápidas (tecla -> filtro)"""
+        quick_keys = {}
+        
+        if self.filter_config and "filters" in self.filter_config:
+            for filter_type, filter_info in self.filter_config["filters"].items():
+                quick_key = filter_info.get("quick_key")
+                if quick_key:
+                    quick_keys[quick_key] = filter_type
+        
+        return quick_keys
+    
+    def get_filter_by_quick_key(self, key: str) -> Optional[str]:
+        """Obtener tipo de filtro por tecla rápida"""
+        quick_keys = self.get_quick_key_mapping()
+        return quick_keys.get(key)
+    
+    def get_quick_keys_help(self) -> str:
+        """Generar texto de ayuda para teclas rápidas"""
+        help_text = "Teclas rápidas de filtros:\n"
+        
+        if self.filter_config and "filters" in self.filter_config:
+            for filter_type, filter_info in self.filter_config["filters"].items():
+                quick_key = filter_info.get("quick_key")
+                if quick_key:
+                    name = filter_info.get("name", filter_type)
+                    help_text += f"   - '{quick_key}': {name}\n"
+        
+        return help_text.strip()
+    
     def _simulate_uv_effect(self, img: np.ndarray) -> np.ndarray:
         """Simular efecto de luz UV para detección de contaminación"""
         if img is None:
@@ -184,8 +237,7 @@ class FilterManager:
         # 1. Aumentar saturación para simular fluorescencia
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
-        s = cv2.multiply(s, 2.0)  # Doblar saturación
-        s = np.clip(s, 0, 255).astype(np.uint8)
+        s = np.clip(s.astype(np.float32) * 2.0, 0, 255).astype(np.uint8)  # Doblar saturación
         
         # 2. Aplicar tinte azul/púrpura característico de UV
         enhanced_hsv = cv2.merge([h, s, v])
@@ -193,9 +245,9 @@ class FilterManager:
         
         # 3. Aplicar tinte azul/púrpura
         uv_img = enhanced_img.astype(np.float32)
-        uv_img[:, :, 0] = cv2.multiply(uv_img[:, :, 0], 1.5)  # Más azul
-        uv_img[:, :, 1] = cv2.multiply(uv_img[:, :, 1], 0.7)  # Menos verde
-        uv_img[:, :, 2] = cv2.multiply(uv_img[:, :, 2], 0.8)  # Menos rojo
+        uv_img = self._safe_multiply_channel(uv_img, 0, 1.5)  # Más azul
+        uv_img = self._safe_multiply_channel(uv_img, 1, 0.7)  # Menos verde
+        uv_img = self._safe_multiply_channel(uv_img, 2, 0.8)  # Menos rojo
         uv_img = np.clip(uv_img, 0, 255).astype(np.uint8)
         
         # 4. Realzar bordes para simular fluorescencia
@@ -264,7 +316,7 @@ class FilterManager:
                 return nir_img
                 
             except Exception as e:
-                print(f"⚠️ Error en GPU, usando CPU: {e}")
+                print(f"[WARNING] Error en GPU, usando CPU: {e}")
                 # Fallback a CPU
                 pass
         
@@ -357,7 +409,7 @@ class FilterManager:
                 return spectral_img
                 
             except Exception as e:
-                print(f"⚠️ Error en GPU, usando CPU: {e}")
+                print(f"[WARNING] Error en GPU, usando CPU: {e}")
                 # Fallback a CPU
                 pass
         
@@ -447,7 +499,7 @@ class FilterManager:
                 return texture_img
                 
             except Exception as e:
-                print(f"⚠️ Error en GPU, usando CPU: {e}")
+                print(f"[WARNING] Error en GPU, usando CPU: {e}")
                 # Fallback a CPU
                 pass
         
@@ -507,8 +559,7 @@ class FilterManager:
         # 5. Ajustar saturación para realzar diferencias de color
         hsv = cv2.cvtColor(enhanced_img, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
-        s = cv2.multiply(s, 1.5)
-        s = np.clip(s, 0, 255).astype(np.uint8)
+        s = np.clip(s.astype(np.float32) * 1.5, 0, 255).astype(np.uint8)
         enhanced_hsv = cv2.merge([h, s, v])
         enhanced_img = cv2.cvtColor(enhanced_hsv, cv2.COLOR_HSV2BGR)
         
@@ -543,15 +594,124 @@ class FilterManager:
         
         # 6. Aplicar tinte rojizo para resaltar moho
         mold_img = img.copy()
-        mold_img[:, :, 2] = cv2.multiply(mold_img[:, :, 2], 1.5)  # Más rojo
-        mold_img[:, :, 1] = cv2.multiply(mold_img[:, :, 1], 0.7)  # Menos verde
-        mold_img[:, :, 0] = cv2.multiply(mold_img[:, :, 0], 0.7)  # Menos azul
+        mold_img = FilterManager._safe_multiply_channel(mold_img, 2, 1.5)  # Más rojo
+        mold_img = FilterManager._safe_multiply_channel(mold_img, 1, 0.7)  # Menos verde
+        mold_img = FilterManager._safe_multiply_channel(mold_img, 0, 0.7)  # Menos azul
         
         # 7. Realzar áreas con moho detectado
         mold_areas = cv2.bitwise_and(mold_img, mold_img, mask=mold_mask)
         mold_img = cv2.addWeighted(mold_img, 0.6, mold_areas, 0.4, 0)
         
         return mold_img
+
+    def _simulate_crack_detection_filter(self, img: np.ndarray) -> np.ndarray:
+        """
+        Filtro especializado para detección de grietas/fracturas en la cáscara
+        Basado en técnicas de polarización óptica y análisis de sombras
+        """
+        if img is None:
+            return img
+            
+        # 1) Simulación de filtro polarizador - reduce reflejos y mejora contraste de grietas
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # 2) Análisis de gradientes direccionales (simula detección de bordes con polarización)
+        grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        gradient_direction = np.arctan2(grad_y, grad_x)
+        
+        # 3) Detección de líneas direccionales (grietas tienden a ser lineales)
+        # Usar transformada de Hough para detectar líneas
+        edges = cv2.Canny(gray, 30, 100)
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, minLineLength=30, maxLineGap=10)
+        
+        # 4) Crear máscara de grietas basada en líneas detectadas
+        crack_mask = np.zeros(gray.shape, dtype=np.uint8)
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(crack_mask, (x1, y1), (x2, y2), 255, 3)
+        
+        # 5) Análisis de sombras (grietas crean sombras características)
+        # Usar filtro Laplaciano para detectar cambios bruscos de intensidad
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        laplacian = np.uint8(np.absolute(laplacian))
+        
+        # 6) Combinar detección de líneas con análisis de sombras
+        shadow_mask = cv2.threshold(laplacian, 30, 255, cv2.THRESH_BINARY)[1]
+        combined_mask = cv2.bitwise_or(crack_mask, shadow_mask)
+        
+        # 7) Morfología para conectar segmentos de grietas
+        kernel_line = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 1))
+        kernel_connect = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel_line)
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel_connect)
+        
+        # 8) Aplicar tinte azulado (simula contraste mejorado con polarización)
+        crack_img = img.copy()
+        crack_img = FilterManager._safe_multiply_channel(crack_img, 0, 1.4)  # Más azul
+        crack_img = FilterManager._safe_multiply_channel(crack_img, 1, 0.8)  # Menos verde
+        crack_img = FilterManager._safe_multiply_channel(crack_img, 2, 0.7)  # Menos rojo
+        
+        # 9) Realce localizado en las grietas detectadas
+        crack_areas = cv2.bitwise_and(crack_img, crack_img, mask=combined_mask)
+        crack_img = cv2.addWeighted(crack_img, 0.7, crack_areas, 0.3, 0)
+        
+        return crack_img
+    
+    def _simulate_uv_fluorescence_filter(self, img: np.ndarray) -> np.ndarray:
+        """
+        Filtro UV-A simulado (~365nm) para detección de fluorescencia de moho
+        Basado en principios de fluorescencia de metabolitos fúngicos
+        """
+        if img is None:
+            return img
+            
+        # 1) Simulación de iluminación UV-A (~365nm)
+        # Los metabolitos de hongos suelen fluorescer en azul-verde bajo UV-A
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        
+        # 2) Realzar saturación para simular fluorescencia
+        s_enhanced = np.clip(s.astype(np.float32) * 2.5, 0, 255).astype(np.uint8)
+        
+        # 3) Aplicar filtro de paso de banda simulado (BP470-505nm para fluorescencia azul-verde)
+        # Simular que solo pasa la fluorescencia emitida
+        enhanced_hsv = cv2.merge([h, s_enhanced, v])
+        base_fluorescence = cv2.cvtColor(enhanced_hsv, cv2.COLOR_HSV2BGR)
+        
+        # 4) Detectar áreas con fluorescencia característica
+        # Las áreas con moho suelen tener fluorescencia azul-verde
+        lab = cv2.cvtColor(base_fluorescence, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # 5) Detectar fluorescencia azul-verde (canal b* alto, canal a* bajo)
+        blue_green_fluorescence = cv2.inRange(lab, (0, 100, 120), (255, 255, 255))
+        
+        # 6) Detectar fluorescencia verde-amarilla (alternativa)
+        green_yellow_fluorescence = cv2.inRange(lab, (0, 80, 100), (255, 255, 255))
+        
+        # 7) Combinar detecciones de fluorescencia
+        fluorescence_mask = cv2.bitwise_or(blue_green_fluorescence, green_yellow_fluorescence)
+        
+        # 8) Aplicar tinte característico de fluorescencia UV
+        uv_img = base_fluorescence.copy().astype(np.float32)
+        # Realzar canales azul y verde (fluorescencia típica)
+        uv_img[:, :, 0] *= 1.6  # Más azul
+        uv_img[:, :, 1] *= 1.4  # Más verde
+        uv_img[:, :, 2] *= 0.3  # Menos rojo (típico de fluorescencia)
+        uv_img = np.clip(uv_img, 0, 255).astype(np.uint8)
+        
+        # 9) Realzar áreas con fluorescencia detectada
+        fluorescent_areas = cv2.bitwise_and(uv_img, uv_img, mask=fluorescence_mask)
+        uv_img = cv2.addWeighted(uv_img, 0.5, fluorescent_areas, 0.5, 0)
+        
+        # 10) Simular ambiente oscuro necesario para UV (reducir brillo general)
+        uv_img = cv2.addWeighted(uv_img, 0.8, np.zeros_like(uv_img), 0.2, 0)
+        
+        return uv_img
+    
     
     @staticmethod
     def _simulate_rot_detection_filter(img: np.ndarray) -> np.ndarray:
@@ -579,9 +739,9 @@ class FilterManager:
         
         # 6. Aplicar tinte amarronado
         rot_img = img.copy()
-        rot_img[:, :, 2] = cv2.multiply(rot_img[:, :, 2], 1.3)  # Más rojo
-        rot_img[:, :, 1] = cv2.multiply(rot_img[:, :, 1], 1.2)  # Más verde
-        rot_img[:, :, 0] = cv2.multiply(rot_img[:, :, 0], 0.8)  # Menos azul
+        rot_img = FilterManager._safe_multiply_channel(rot_img, 2, 1.3)  # Más rojo
+        rot_img = FilterManager._safe_multiply_channel(rot_img, 1, 1.2)  # Más verde
+        rot_img = FilterManager._safe_multiply_channel(rot_img, 0, 0.8)  # Menos azul
         
         # 7. Realzar áreas podridas
         rot_areas = cv2.bitwise_and(rot_img, rot_img, mask=rot_mask)
@@ -621,9 +781,9 @@ class FilterManager:
         
         # 6. Aplicar tinte púrpura para hongos
         fungal_img = img.copy()
-        fungal_img[:, :, 0] = cv2.multiply(fungal_img[:, :, 0], 1.3)  # Más azul
-        fungal_img[:, :, 2] = cv2.multiply(fungal_img[:, :, 2], 1.4)  # Más rojo
-        fungal_img[:, :, 1] = cv2.multiply(fungal_img[:, :, 1], 0.6)  # Menos verde
+        fungal_img = FilterManager._safe_multiply_channel(fungal_img, 0, 1.3)  # Más azul
+        fungal_img = FilterManager._safe_multiply_channel(fungal_img, 2, 1.4)  # Más rojo
+        fungal_img = FilterManager._safe_multiply_channel(fungal_img, 1, 0.6)  # Menos verde
         
         # 7. Realzar áreas con hongos
         fungal_areas = cv2.bitwise_and(fungal_img, fungal_img, mask=fungal_mask)
@@ -657,9 +817,9 @@ class FilterManager:
         
         # 5. Aplicar tinte rojizo para resaltar micotoxinas
         mycotoxin_img = img.copy()
-        mycotoxin_img[:, :, 2] = cv2.multiply(mycotoxin_img[:, :, 2], 1.8)  # Más rojo
-        mycotoxin_img[:, :, 1] = cv2.multiply(mycotoxin_img[:, :, 1], 0.5)  # Menos verde
-        mycotoxin_img[:, :, 0] = cv2.multiply(mycotoxin_img[:, :, 0], 0.3)  # Menos azul
+        mycotoxin_img = self._safe_multiply_channel(mycotoxin_img, 2, 1.8)  # Más rojo
+        mycotoxin_img = self._safe_multiply_channel(mycotoxin_img, 1, 0.5)  # Menos verde
+        mycotoxin_img = self._safe_multiply_channel(mycotoxin_img, 0, 0.3)  # Menos azul
         
         # 6. Realzar áreas con micotoxinas detectadas
         mycotoxin_areas = cv2.bitwise_and(mycotoxin_img, mycotoxin_img, mask=combined_mask)
@@ -697,9 +857,9 @@ class FilterManager:
         
         # 5. Aplicar tinte azul-verde fluorescente
         aflatoxin_img = img.copy()
-        aflatoxin_img[:, :, 0] = cv2.multiply(aflatoxin_img[:, :, 0], 1.5)  # Más azul
-        aflatoxin_img[:, :, 1] = cv2.multiply(aflatoxin_img[:, :, 1], 1.3)  # Más verde
-        aflatoxin_img[:, :, 2] = cv2.multiply(aflatoxin_img[:, :, 2], 0.2)  # Menos rojo
+        aflatoxin_img = self._safe_multiply_channel(aflatoxin_img, 0, 1.5)  # Más azul
+        aflatoxin_img = self._safe_multiply_channel(aflatoxin_img, 1, 1.3)  # Más verde
+        aflatoxin_img = self._safe_multiply_channel(aflatoxin_img, 2, 0.2)  # Menos rojo
         
         # 6. Realzar fluorescencia
         aflatoxin_areas = cv2.bitwise_and(aflatoxin_img, aflatoxin_img, mask=aflatoxin_mask)
@@ -712,32 +872,54 @@ class FilterManager:
         if img is None:
             return img
         
+        # Verificación de debug
+        print(f"[DEBUG] Discoloration filter - Image shape: {img.shape}, dtype: {img.dtype}")
+        
         # 1. Análisis multi-espectral de decoloraciones
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
         
         # 2. Detectar patrones de decoloración específicos
         # Decoloración por hongos: cambios en canales a* y b*
+        print("[DEBUG] Calculando discoloration_a...")
         discoloration_a = cv2.threshold(np.abs(a - np.mean(a)), 20, 255, cv2.THRESH_BINARY)[1]
+        print("[DEBUG] Calculando discoloration_b...")
         discoloration_b = cv2.threshold(np.abs(b - np.mean(b)), 25, 255, cv2.THRESH_BINARY)[1]
         
         # 3. Detectar patrones de difusión (hongos se extienden gradualmente)
+        print("[DEBUG] Convirtiendo a escala de grises...")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        print("[DEBUG] Calculando gradiente Sobel...")
         gradient = cv2.Sobel(gray, cv2.CV_64F, 1, 1, ksize=3)
+        print("[DEBUG] Convirtiendo gradiente a uint8...")
         gradient = np.uint8(np.absolute(gradient))
         
         # 4. Crear máscara de difusión
+        print("[DEBUG] Creando máscara de difusión...")
         diffusion_mask = cv2.threshold(gradient, 40, 255, cv2.THRESH_BINARY)[1]
         
         # 5. Combinar detecciones
+        print(f"[DEBUG] discoloration_a shape: {discoloration_a.shape}, dtype: {discoloration_a.dtype}")
+        print(f"[DEBUG] discoloration_b shape: {discoloration_b.shape}, dtype: {discoloration_b.dtype}")
+        print(f"[DEBUG] diffusion_mask shape: {diffusion_mask.shape}, dtype: {diffusion_mask.dtype}")
+        
+        print("[DEBUG] Combinando discoloration_a y discoloration_b...")
         discoloration_mask = cv2.bitwise_or(discoloration_a, discoloration_b)
+        print("[DEBUG] Combinando con diffusion_mask...")
         discoloration_mask = cv2.bitwise_or(discoloration_mask, diffusion_mask)
+        print("[DEBUG] Máscaras combinadas exitosamente")
         
         # 6. Aplicar tinte amarillo-naranja para resaltar decoloraciones
+        print("[DEBUG] Aplicando tinte a imagen...")
         discoloration_img = img.copy()
-        discoloration_img[:, :, 2] = cv2.multiply(discoloration_img[:, :, 2], 1.4)  # Más rojo
-        discoloration_img[:, :, 1] = cv2.multiply(discoloration_img[:, :, 1], 1.2)  # Más verde
-        discoloration_img[:, :, 0] = cv2.multiply(discoloration_img[:, :, 0], 0.8)  # Menos azul
+        print(f"[DEBUG] Imagen copiada - shape: {discoloration_img.shape}, dtype: {discoloration_img.dtype}")
+        
+        discoloration_img = FilterManager._safe_multiply_channel(discoloration_img, 2, 1.4)  # Más rojo
+        print("[DEBUG] Canal rojo procesado")
+        discoloration_img = FilterManager._safe_multiply_channel(discoloration_img, 1, 1.2)  # Más verde
+        print("[DEBUG] Canal verde procesado")
+        discoloration_img = FilterManager._safe_multiply_channel(discoloration_img, 0, 0.8)  # Menos azul
+        print("[DEBUG] Canal azul procesado")
         
         # 7. Realzar áreas decoloradas
         discoloration_areas = cv2.bitwise_and(discoloration_img, discoloration_img, mask=discoloration_mask)
@@ -774,9 +956,9 @@ class FilterManager:
         
         # 7. Aplicar tinte púrpura para diferentes tipos de moho
         mold_texture_img = img.copy()
-        mold_texture_img[:, :, 0] = cv2.multiply(mold_texture_img[:, :, 0], 1.4)  # Más azul
-        mold_texture_img[:, :, 2] = cv2.multiply(mold_texture_img[:, :, 2], 1.3)  # Más rojo
-        mold_texture_img[:, :, 1] = cv2.multiply(mold_texture_img[:, :, 1], 0.7)  # Menos verde
+        mold_texture_img = self._safe_multiply_channel(mold_texture_img, 0, 1.4)  # Más azul
+        mold_texture_img = self._safe_multiply_channel(mold_texture_img, 2, 1.3)  # Más rojo
+        mold_texture_img = self._safe_multiply_channel(mold_texture_img, 1, 0.7)  # Menos verde
         
         # 8. Realzar texturas de moho
         mold_texture_areas = cv2.bitwise_and(mold_texture_img, mold_texture_img, mask=mold_texture_mask)
@@ -820,9 +1002,9 @@ class FilterManager:
         
         # 7. Aplicar tinte verde fluorescente para esporas
         spore_img = img.copy()
-        spore_img[:, :, 1] = cv2.multiply(spore_img[:, :, 1], 1.6)  # Más verde
-        spore_img[:, :, 0] = cv2.multiply(spore_img[:, :, 0], 0.8)  # Menos azul
-        spore_img[:, :, 2] = cv2.multiply(spore_img[:, :, 2], 0.4)  # Menos rojo
+        spore_img = self._safe_multiply_channel(spore_img, 1, 1.6)  # Más verde
+        spore_img = self._safe_multiply_channel(spore_img, 0, 0.8)  # Menos azul
+        spore_img = self._safe_multiply_channel(spore_img, 2, 0.4)  # Menos rojo
         
         # 8. Realzar esporas detectadas
         spore_areas = cv2.bitwise_and(spore_img, spore_img, mask=final_spore_mask)
@@ -871,219 +1053,289 @@ class FilterManager:
         
         # Aplicar tinte rojizo para áreas contaminadas
         contaminated_areas = brazil_img.copy()
-        contaminated_areas[:, :, 2] = cv2.multiply(contaminated_areas[:, :, 2], 1.5)  # Más rojo
-        contaminated_areas[:, :, 1] = cv2.multiply(contaminated_areas[:, :, 1], 0.8)  # Menos verde
-        contaminated_areas[:, :, 0] = cv2.multiply(contaminated_areas[:, :, 0], 0.7)  # Menos azul
+        contaminated_areas = self._safe_multiply_channel(contaminated_areas, 2, 1.5)  # Más rojo
+        contaminated_areas = self._safe_multiply_channel(contaminated_areas, 1, 0.8)  # Menos verde
+        contaminated_areas = self._safe_multiply_channel(contaminated_areas, 0, 0.7)  # Menos azul
         
         # 9. Combinar imagen final
         brazil_img = cv2.addWeighted(healthy_areas, 0.7, contaminated_areas, 0.3, 0)
         
         return brazil_img
     
-    def apply_fungal_contamination_pipeline(self, img: np.ndarray) -> Tuple[np.ndarray, Dict[str, float], str]:
+    def _clahe_enhanced_filter(self, img: np.ndarray) -> np.ndarray:
         """
-        Pipeline automatizado para detección de hongos y contaminación en castañas brasileñas
-        
-        Pipeline optimizado:
-        1. brazil_chestnut → normalización inicial
-        2. discoloration → detección de zonas sospechosas  
-        3. mold_texture → confirmación de textura fúngica
-        4. fungal + spore_detection → evidencia estructural
-        5. mycotoxin + aflatoxin → detección de toxinas residuales
-        
-        Args:
-            img: Imagen de entrada
-            
-        Returns:
-            Tuple[imagen_resultado, scores_contaminacion, descripcion_detalles]
+        CLAHE (Contrast Limited Adaptive Histogram Equalization) avanzado
+        Realza contraste en zonas con moho o suciedad
         """
         if img is None:
-            return img, {}, "Error: imagen nula"
-        
-        print("[PIPELINE] Iniciando análisis de contaminación fúngica...")
-        
-        contamination_scores = {}
-        pipeline_steps = []
+            return img
         
         try:
-            # PASO 1: Normalización inicial con brazil_chestnut
-            print("[PIPELINE] Paso 1/6: Normalización inicial...")
-            normalized_img, _, _ = self.apply_filter(img, "brazil_chestnut")
-            pipeline_steps.append("Normalización inicial")
+            # Convertir a LAB para mejor control de luminosidad
+            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
             
-            # PASO 2: Detección de decoloración
-            print("[PIPELINE] Paso 2/6: Detección de decoloración...")
-            discoloration_img, _, _ = self.apply_filter(img, "discoloration")
-            discoloration_score = self._calculate_contamination_score(discoloration_img, "discoloration")
-            contamination_scores["decoloracion"] = discoloration_score
-            pipeline_steps.append(f"Decoloración detectada: {discoloration_score:.2f}")
+            # Aplicar CLAHE con parámetros optimizados para detección de moho
+            clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+            l_enhanced = clahe.apply(l)
             
-            # PASO 3: Análisis de textura de moho
-            print("[PIPELINE] Paso 3/6: Análisis de textura de moho...")
-            mold_texture_img, _, _ = self.apply_filter(img, "mold_texture")
-            mold_texture_score = self._calculate_contamination_score(mold_texture_img, "mold_texture")
-            contamination_scores["textura_moho"] = mold_texture_score
-            pipeline_steps.append(f"Textura de moho: {mold_texture_score:.2f}")
+            # Aplicar CLAHE adicional en canal A (verde-rojo) para detectar cambios de color
+            a_enhanced = clahe.apply(a)
             
-            # PASO 4: Detección estructural de hongos
-            print("[PIPELINE] Paso 4/6: Detección estructural de hongos...")
-            fungal_img, _, _ = self.apply_filter(img, "fungal")
-            spore_img, _, _ = self.apply_filter(img, "spore_detection")
+            # Recombinar canales
+            enhanced_lab = cv2.merge([l_enhanced, a_enhanced, b])
+            enhanced_img = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
             
-            fungal_score = self._calculate_contamination_score(fungal_img, "fungal")
-            spore_score = self._calculate_contamination_score(spore_img, "spore_detection")
+            # Detectar áreas con alto contraste (posible moho)
+            gray = cv2.cvtColor(enhanced_img, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, 30, 100)
             
-            contamination_scores["hongos_estructurales"] = fungal_score
-            contamination_scores["esporas"] = spore_score
-            pipeline_steps.append(f"Hongos estructurales: {fungal_score:.2f}, Esporas: {spore_score:.2f}")
+            # Crear máscara de áreas de alto contraste
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            edges_processed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
             
-            # PASO 5: Detección de toxinas
-            print("[PIPELINE] Paso 5/6: Detección de toxinas...")
-            mycotoxin_img, _, _ = self.apply_filter(img, "mycotoxin")
-            aflatoxin_img, _, _ = self.apply_filter(img, "aflatoxin")
+            # Aplicar tinte rojizo para resaltar áreas con moho
+            clahe_img = enhanced_img.copy()
+            clahe_img = self._safe_multiply_channel(clahe_img, 2, 1.3)  # Más rojo
+            clahe_img = self._safe_multiply_channel(clahe_img, 1, 0.8)  # Menos verde
+            clahe_img = self._safe_multiply_channel(clahe_img, 0, 0.8)  # Menos azul
             
-            mycotoxin_score = self._calculate_contamination_score(mycotoxin_img, "mycotoxin")
-            aflatoxin_score = self._calculate_contamination_score(aflatoxin_img, "aflatoxin")
+            # Realzar áreas con alto contraste
+            contrast_areas = cv2.bitwise_and(clahe_img, clahe_img, mask=edges_processed)
+            clahe_img = cv2.addWeighted(clahe_img, 0.7, contrast_areas, 0.3, 0)
             
-            contamination_scores["micotoxinas"] = mycotoxin_score
-            contamination_scores["aflatoxinas"] = aflatoxin_score
-            pipeline_steps.append(f"Micotoxinas: {mycotoxin_score:.2f}, Aflatoxinas: {aflatoxin_score:.2f}")
-            
-            # PASO 6: Combinar resultados visualmente
-            print("[PIPELINE] Paso 6/6: Combinando resultados...")
-            final_img = self._combine_pipeline_results(
-                normalized_img, discoloration_img, mold_texture_img, 
-                fungal_img, spore_img, mycotoxin_img, aflatoxin_img
-            )
-            
-            # Calcular score total de contaminación
-            total_score = self._calculate_total_contamination_score(contamination_scores)
-            contamination_scores["total"] = total_score
-            
-            # Generar descripción detallada
-            description = self._generate_contamination_report(contamination_scores, pipeline_steps)
-            
-            print(f"[PIPELINE] Análisis completado. Score total: {total_score:.2f}")
-            return final_img, contamination_scores, description
+            return clahe_img
             
         except Exception as e:
-            print(f"[ERROR] Error en pipeline de contaminación: {e}")
-            return img, {"error": 1.0}, f"Error en pipeline: {str(e)}"
+            print(f"[ERROR] Error en filtro CLAHE: {e}")
+            return img
     
-    def _calculate_contamination_score(self, img: np.ndarray, filter_type: str) -> float:
-        """Calcular score de contaminación basado en análisis de imagen"""
+    def _gabor_texture_filter(self, img: np.ndarray) -> np.ndarray:
+        """
+        Filtros Gabor para detectar texturas típicas de hongos y rugosidades
+        """
         if img is None:
-            return 0.0
+            return img
+        
+        if not SKIMAGE_AVAILABLE:
+            print("[WARNING] scikit-image no disponible para filtros Gabor")
+            return img
         
         try:
-            # Convertir a escala de grises para análisis
+            # Convertir a escala de grises
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             
-            # Análisis específico por tipo de filtro
-            if filter_type in ["discoloration", "mycotoxin", "aflatoxin"]:
-                # Detectar áreas con cambios de color significativos
-                edges = cv2.Canny(gray, 50, 150)
-                edge_density = np.sum(edges > 0) / (edges.shape[0] * edges.shape[1])
-                return min(edge_density * 10, 1.0)  # Normalizar a 0-1
+            # Aplicar múltiples filtros Gabor con diferentes orientaciones y frecuencias
+            # Orientaciones típicas para detectar texturas fúngicas
+            orientations = [0, 30, 60, 90, 120, 150]  # grados
+            frequencies = [0.1, 0.2, 0.3]  # frecuencias espaciales
             
-            elif filter_type in ["mold_texture", "fungal", "spore_detection"]:
-                # Detectar texturas complejas (hongos)
-                laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-                texture_variance = np.var(laplacian)
-                return min(texture_variance / 10000, 1.0)  # Normalizar
+            gabor_responses = []
             
-            else:
-                # Análisis general
-                hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
-                contrast = np.std(hist)
-                return min(contrast / 1000, 1.0)
+            for freq in frequencies:
+                for orientation in orientations:
+                    # Convertir orientación a radianes
+                    theta = np.radians(orientation)
+                    
+                    # Aplicar filtro Gabor
+                    filtered_real, _ = gabor(gray, frequency=freq, theta=theta)
+                    
+                    # Usar solo la respuesta real (magnitud)
+                    gabor_responses.append(np.abs(filtered_real))
+            
+            # Combinar respuestas de múltiples filtros Gabor
+            if gabor_responses:
+                # Promediar todas las respuestas
+                combined_gabor = np.mean(gabor_responses, axis=0)
                 
+                # Normalizar a rango 0-255
+                combined_gabor = ((combined_gabor - combined_gabor.min()) / 
+                                (combined_gabor.max() - combined_gabor.min()) * 255).astype(np.uint8)
+                
+                # Crear imagen en color con tinte púrpura para texturas fúngicas
+                gabor_img = img.copy()
+                gabor_img = self._safe_multiply_channel(gabor_img, 0, 1.4)  # Más azul
+                gabor_img = self._safe_multiply_channel(gabor_img, 2, 1.3)  # Más rojo
+                gabor_img = self._safe_multiply_channel(gabor_img, 1, 0.7)  # Menos verde
+                
+                # Aplicar máscara de texturas detectadas
+                texture_mask = cv2.threshold(combined_gabor, 50, 255, cv2.THRESH_BINARY)[1]
+                texture_areas = cv2.bitwise_and(gabor_img, gabor_img, mask=texture_mask)
+                gabor_img = cv2.addWeighted(gabor_img, 0.6, texture_areas, 0.4, 0)
+                
+                return gabor_img
+            else:
+                return img
+            
         except Exception as e:
-            print(f"[ERROR] Error calculando score para {filter_type}: {e}")
-            return 0.0
+            print(f"[ERROR] Error en filtros Gabor: {e}")
+            return img
     
-    def _combine_pipeline_results(self, *images) -> np.ndarray:
-        """Combinar resultados de múltiples filtros en una imagen final"""
-        if not images or images[0] is None:
-            return images[0] if images else None
+    def _lbp_microtexture_filter(self, img: np.ndarray) -> np.ndarray:
+        """
+        Local Binary Patterns para analizar microtexturas del cascarón
+        Detecta cambios en microtextura causados por moho
+        """
+        if img is None:
+            return img
+        
+        if not SKIMAGE_AVAILABLE:
+            print("[WARNING] scikit-image no disponible para LBP")
+            return img
         
         try:
-            # Usar la primera imagen como base
-            result = images[0].copy().astype(np.float32)
+            # Convertir a escala de grises
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             
-            # Combinar con pesos específicos para cada tipo de detección
-            weights = [0.15, 0.15, 0.20, 0.15, 0.15, 0.10, 0.10]  # Suma = 1.0
+            # Parámetros LBP optimizados para microtexturas de castañas
+            radius = 2
+            n_points = 8 * radius
             
-            for i, img in enumerate(images[1:], 1):
-                if img is not None:
-                    img_float = img.astype(np.float32)
-                    weight = weights[i] if i < len(weights) else 0.1
-                    result = cv2.addWeighted(result, 1 - weight, img_float, weight, 0)
+            # Calcular LBP
+            lbp = local_binary_pattern(gray, n_points, radius, method='uniform')
             
-            return result.astype(np.uint8)
+            # Calcular histograma de LBP para detectar patrones anómalos
+            hist, _ = np.histogram(lbp.ravel(), bins=n_points + 2, range=(0, n_points + 2))
+            hist = hist.astype(float)
+            hist /= (hist.sum() + 1e-7)  # Normalizar
+            
+            # Detectar áreas con patrones LBP inusuales (posible moho)
+            # Las áreas con moho suelen tener patrones LBP más uniformes
+            lbp_variance = np.var(lbp)
+            lbp_std = np.std(lbp)
+            
+            # Crear máscara de áreas con microtextura anómala
+            threshold = np.mean(lbp) + lbp_std
+            anomaly_mask = cv2.threshold(lbp.astype(np.uint8), threshold, 255, cv2.THRESH_BINARY)[1]
+            
+            # Aplicar tinte verde para resaltar microtexturas
+            lbp_img = img.copy()
+            lbp_img = self._safe_multiply_channel(lbp_img, 1, 1.4)  # Más verde
+            lbp_img = self._safe_multiply_channel(lbp_img, 0, 0.8)  # Menos azul
+            lbp_img = self._safe_multiply_channel(lbp_img, 2, 0.8)  # Menos rojo
+            
+            # Realzar áreas con microtextura anómala
+            texture_areas = cv2.bitwise_and(lbp_img, lbp_img, mask=anomaly_mask)
+            lbp_img = cv2.addWeighted(lbp_img, 0.7, texture_areas, 0.3, 0)
+            
+            return lbp_img
+                
+        except Exception as e:
+            print(f"[ERROR] Error en filtro LBP: {e}")
+            return img
+    
+    def _color_segmentation_filter(self, img: np.ndarray) -> np.ndarray:
+        """
+        Segmentación por color para detectar manchas por diferencias en tono HSV/LAB
+        """
+        if img is None:
+            return img
+        
+        try:
+            # Análisis en espacio HSV
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            h, s, v = cv2.split(hsv)
+            
+            # Análisis en espacio LAB
+            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            
+            # Detectar manchas oscuras (moho típico)
+            dark_mask_hsv = cv2.inRange(hsv, (0, 0, 0), (180, 255, 80))
+            dark_mask_lab = cv2.inRange(lab, (0, 0, 0), (80, 255, 255))
+            dark_mask = cv2.bitwise_or(dark_mask_hsv, dark_mask_lab)
+            
+            # Detectar manchas verdes/azules (moho coloreado)
+            green_mask_hsv = cv2.inRange(hsv, (40, 50, 50), (80, 255, 200))
+            green_mask_lab = cv2.inRange(lab, (0, 120, 80), (255, 255, 255))
+            green_mask = cv2.bitwise_or(green_mask_hsv, green_mask_lab)
+            
+            # Detectar manchas marrones/amarillas (decaimiento)
+            brown_mask_hsv = cv2.inRange(hsv, (10, 50, 50), (30, 255, 200))
+            brown_mask_lab = cv2.inRange(lab, (0, 100, 120), (255, 255, 255))
+            brown_mask = cv2.bitwise_or(brown_mask_hsv, brown_mask_lab)
+            
+            # Combinar todas las detecciones de manchas
+            combined_mask = cv2.bitwise_or(dark_mask, green_mask)
+            combined_mask = cv2.bitwise_or(combined_mask, brown_mask)
+            
+            # Limpiar ruido con operaciones morfológicas
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
+            combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
+            
+            # Aplicar tinte rojizo para resaltar manchas detectadas
+            color_img = img.copy()
+            color_img = self._safe_multiply_channel(color_img, 2, 1.5)  # Más rojo
+            color_img = self._safe_multiply_channel(color_img, 1, 0.7)  # Menos verde
+            color_img = self._safe_multiply_channel(color_img, 0, 0.7)  # Menos azul
+            
+            # Realzar áreas con manchas detectadas
+            spot_areas = cv2.bitwise_and(color_img, color_img, mask=combined_mask)
+            color_img = cv2.addWeighted(color_img, 0.6, spot_areas, 0.4, 0)
+            
+            return color_img
             
         except Exception as e:
-            print(f"[ERROR] Error combinando resultados: {e}")
-            return images[0] if images else None
+            print(f"[ERROR] Error en segmentación por color: {e}")
+            return img
     
-    def _calculate_total_contamination_score(self, scores: Dict[str, float]) -> float:
-        """Calcular score total de contaminación con pesos específicos"""
-        if not scores:
-            return 0.0
+    def _entropy_variance_filter(self, img: np.ndarray) -> np.ndarray:
+        """
+        Filtros de entropía y varianza para detectar áreas contaminadas
+        Las áreas contaminadas suelen tener entropía local más alta
+        """
+        if img is None:
+            return img
         
-        # Pesos específicos para cada tipo de contaminación
-        weights = {
-            "decoloracion": 0.15,
-            "textura_moho": 0.25,
-            "hongos_estructurales": 0.20,
-            "esporas": 0.15,
-            "micotoxinas": 0.15,
-            "aflatoxinas": 0.10
-        }
-        
-        total_score = 0.0
-        total_weight = 0.0
-        
-        for key, score in scores.items():
-            if key in weights and key != "total":
-                weight = weights[key]
-                total_score += score * weight
-                total_weight += weight
-        
-        return total_score / total_weight if total_weight > 0 else 0.0
+        try:
+            # Convertir a escala de grises
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Calcular varianza local usando OpenCV
+            kernel_size = 9
+            kernel = np.ones((kernel_size, kernel_size), np.float32) / (kernel_size * kernel_size)
+            mean = cv2.filter2D(gray.astype(np.float32), -1, kernel)
+            sqr_mean = cv2.filter2D((gray.astype(np.float32))**2, -1, kernel)
+            variance = sqr_mean - mean**2
+            
+            # Normalizar varianza
+            variance_normalized = ((variance - variance.min()) / 
+                                 (variance.max() - variance.min()) * 255).astype(np.uint8)
+            
+            # Calcular entropía local si scikit-image está disponible
+            if SKIMAGE_AVAILABLE:
+                try:
+                    # Calcular entropía local
+                    entropy_img = entropy(gray, disk(5))
+                    entropy_normalized = ((entropy_img - entropy_img.min()) / 
+                                        (entropy_img.max() - entropy_img.min()) * 255).astype(np.uint8)
+                    
+                    # Combinar varianza y entropía
+                    combined_variance_entropy = cv2.addWeighted(variance_normalized, 0.6, entropy_normalized, 0.4, 0)
+                except:
+                    combined_variance_entropy = variance_normalized
+            else:
+                combined_variance_entropy = variance_normalized
+            
+            # Detectar áreas con alta variabilidad local
+            high_variance_threshold = np.percentile(combined_variance_entropy, 85)
+            high_variance_mask = cv2.threshold(combined_variance_entropy, high_variance_threshold, 255, cv2.THRESH_BINARY)[1]
+            
+            # Aplicar tinte naranja para resaltar áreas de alta variabilidad
+            entropy_img = img.copy()
+            entropy_img = self._safe_multiply_channel(entropy_img, 2, 1.4)  # Más rojo
+            entropy_img = self._safe_multiply_channel(entropy_img, 1, 1.2)  # Más verde
+            entropy_img = self._safe_multiply_channel(entropy_img, 0, 0.6)  # Menos azul
+            
+            # Realzar áreas con alta variabilidad local
+            variance_areas = cv2.bitwise_and(entropy_img, entropy_img, mask=high_variance_mask)
+            entropy_img = cv2.addWeighted(entropy_img, 0.7, variance_areas, 0.3, 0)
+            
+            return entropy_img
+            
+        except Exception as e:
+            print(f"[ERROR] Error en filtro entropía/varianza: {e}")
+            return img
     
-    def _generate_contamination_report(self, scores: Dict[str, float], steps: list) -> str:
-        """Generar reporte detallado de contaminación"""
-        total = scores.get("total", 0.0)
-        
-        # Determinar nivel de contaminación
-        if total < 0.2:
-            level = "BAJA"
-            color = "🟢"
-        elif total < 0.5:
-            level = "MEDIA"
-            color = "🟡"
-        else:
-            level = "ALTA"
-            color = "🔴"
-        
-        report = f"{color} CONTAMINACIÓN {level} (Score: {total:.2f})\n"
-        report += "=" * 40 + "\n"
-        
-        # Detalles por tipo
-        for key, score in scores.items():
-            if key != "total" and key != "error":
-                percentage = score * 100
-                status = "✅ DETECTADO" if score > 0.3 else "⚪ NORMAL"
-                report += f"• {key.replace('_', ' ').title()}: {percentage:.1f}% {status}\n"
-        
-        # Recomendaciones
-        report += "\n📋 RECOMENDACIONES:\n"
-        if total > 0.5:
-            report += "🚫 DESCARTA esta castaña - Contaminación alta\n"
-        elif total > 0.3:
-            report += "⚠️ INSPECCIÓN MANUAL requerida\n"
-        else:
-            report += "✅ APROBADA - Contaminación baja\n"
-        
-        return report
+    

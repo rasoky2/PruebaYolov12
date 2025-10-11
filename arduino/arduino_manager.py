@@ -6,6 +6,10 @@ Maneja detección automática de puertos, conexión y envío de señales
 import time
 from typing import Optional, List
 import serial.tools.list_ports
+from utils.logger import (
+    info, warning,
+    arduino_info, arduino_ok, arduino_error
+)
 
 # Importar PySerial para comunicación con Arduino
 try:
@@ -13,7 +17,7 @@ try:
     SERIAL_AVAILABLE = True
 except ImportError:
     SERIAL_AVAILABLE = False
-    print("[WARNING] Librería 'serial' no disponible. Instala con: pip install pyserial")
+    warning("Librería 'serial' no disponible. Instala con: pip install pyserial")
 
 
 class ArduinoManager:
@@ -35,10 +39,10 @@ class ArduinoManager:
     def list_available_ports(self) -> List:
         """Listar puertos seriales disponibles"""
         if not SERIAL_AVAILABLE:
-            print("[ERROR] Librería 'serial' no disponible")
+            arduino_error("Librería 'serial' no disponible")
             return []
         
-        print("[SEARCH] Puertos seriales disponibles:")
+        arduino_info("Puertos seriales disponibles:")
         try:
             ports = serial.tools.list_ports.comports()
             if ports:
@@ -46,12 +50,12 @@ class ArduinoManager:
                     # Detectar si es Arduino
                     is_arduino = "Arduino" in port.description or "USB" in port.description
                     arduino_marker = " (ARDUINO RECOMENDADO)" if is_arduino else ""
-                    print(f"   {i+1}. {port.device} - {port.description}{arduino_marker}")
+                    info(f"   {i+1}. {port.device} - {port.description}{arduino_marker}")
             else:
-                print("   No se encontraron puertos seriales")
+                info("   No se encontraron puertos seriales")
             return ports
         except Exception as e:
-            print(f"[ERROR] Error listando puertos: {e}")
+            arduino_error(f"Error listando puertos: {e}")
             return []
     
     def auto_detect_port(self) -> Optional[str]:
@@ -74,13 +78,13 @@ class ArduinoManager:
                     
             return None
         except Exception as e:
-            print(f"[ERROR] Error detectando puerto Arduino: {e}")
+            arduino_error(f"Error detectando puerto Arduino: {e}")
             return None
     
     def connect(self, port: str = None, baudrate: int = 9600) -> bool:
         """Conectar con Arduino"""
         if not SERIAL_AVAILABLE:
-            print("[ERROR] Librería 'serial' no disponible. Instala con: pip install pyserial")
+            arduino_error("Librería 'serial' no disponible. Instala con: pip install pyserial")
             self.enabled = False
             return False
         
@@ -88,7 +92,7 @@ class ArduinoManager:
         if port is None:
             port = self.auto_detect_port()
             if port is None:
-                print("[ERROR] No se pudo detectar puerto Arduino automáticamente")
+                arduino_error("No se pudo detectar puerto Arduino automáticamente")
                 self.enabled = False
                 return False
         
@@ -104,16 +108,16 @@ class ArduinoManager:
             self.connection.flush()
             time.sleep(0.5)
             
-            print(f"[OK] Arduino conectado en puerto {port}")
+            arduino_ok(f"Arduino conectado en puerto {port}")
             self.enabled = True
             return True
         except serial.SerialException as e:
-            print(f"[ERROR] Error conectando Arduino: {e}")
-            print(f"[TIP] Asegúrate de que el Arduino esté conectado y el puerto {port} esté disponible")
+            arduino_error(f"Error conectando Arduino: {e}")
+            info(f"TIP: Asegúrate de que el Arduino esté conectado y el puerto {port} esté disponible")
             self.enabled = False
             return False
         except Exception as e:
-            print(f"[ERROR] Error inesperado: {e}")
+            arduino_error(f"Error inesperado: {e}")
             self.enabled = False
             return False
     
@@ -122,7 +126,7 @@ class ArduinoManager:
         if self.connection and self.enabled:
             try:
                 self.connection.close()
-                print("[ARDUINO] Conexión Arduino cerrada")
+                arduino_info("Conexión Arduino cerrada")
             except:
                 pass
         
@@ -154,11 +158,11 @@ class ArduinoManager:
             self.last_signal = signal_type
             self.signal_time = current_time
             
-            print(f"[ARDUINO] Señal enviada al Arduino: {signal_type}")
+            arduino_info(f"Señal enviada al Arduino: {signal_type}")
             return True
             
         except Exception as e:
-            print(f"[ERROR] Error enviando señal al Arduino: {e}")
+            arduino_error(f"Error enviando señal al Arduino: {e}")
             return False
     
     def send_detection_signals(self, total_castanas: int, contaminadas: int) -> None:
@@ -200,24 +204,24 @@ class ArduinoManager:
                 status_info['behavior_text'] = "[OK] Enviará CONTAMINADO si detecta contaminación"
             else:  # CONTAMINADO
                 status_info['signal_color'] = (0, 0, 255)  # Rojo
-                status_info['behavior_text'] = "🔄 Cambiará a SANO si no detecta contaminación"
+                status_info['behavior_text'] = "Cambiará a SANO si no detecta contaminación"
         else:
             status_info['signal_color'] = (255, 255, 0)  # Amarillo
-            status_info['behavior_text'] = "🔄 Cambiará a SANO rápidamente si no detecta"
+            status_info['behavior_text'] = "Cambiará a SANO rápidamente si no detecta"
         
         return status_info
     
     def interactive_setup(self) -> bool:
         """Configuración interactiva de Arduino"""
         if not SERIAL_AVAILABLE:
-            print("[ERROR] Librería 'serial' no disponible. Instala con: pip install pyserial")
+            arduino_error("Librería 'serial' no disponible. Instala con: pip install pyserial")
             return False
         
-        print("\n[ARDUINO] Inicializando conexión Arduino...")
-        print("[TIP] Para conectar Arduino:")
-        print("   1. Conecta el Arduino por USB")
-        print("   2. Verifica el puerto COM (Windows) o /dev/ttyUSB* (Linux)")
-        print("   3. Asegúrate de que el Arduino esté ejecutando el código de recepción")
+        arduino_info("Inicializando conexión Arduino...")
+        info("TIP: Para conectar Arduino:")
+        info("   1. Conecta el Arduino por USB")
+        info("   2. Verifica el puerto COM (Windows) o /dev/ttyUSB* (Linux)")
+        info("   3. Asegúrate de que el Arduino esté ejecutando el código de recepción")
         
         # Listar puertos disponibles
         ports = self.list_available_ports()
@@ -228,7 +232,7 @@ class ArduinoManager:
         selected_port = None
         
         if arduino_port:
-            print(f"\n[OK] Arduino detectado automáticamente: {arduino_port}")
+            arduino_ok(f"Arduino detectado automáticamente: {arduino_port}")
             use_auto = input("¿Usar este puerto? (s/n): ").strip().lower()
             if use_auto in ['s', 'si', 'sí', 'y', 'yes', '']:
                 selected_port = arduino_port
@@ -239,10 +243,10 @@ class ArduinoManager:
         
         if not selected_port and ports:
             # Pedir puerto manualmente
-            print("\n[TIP] Opciones:")
-            print("   1. Ingresa número de la lista (ej: 3)")
-            print("   2. Ingresa puerto completo (ej: COM6)")
-            print("   3. Presiona Enter para omitir Arduino")
+            info("TIP: Opciones:")
+            info("   1. Ingresa número de la lista (ej: 3)")
+            info("   2. Ingresa puerto completo (ej: COM6)")
+            info("   3. Presiona Enter para omitir Arduino")
             
             user_input = input("\nSelección: ").strip()
             
@@ -251,31 +255,31 @@ class ArduinoManager:
                 index = int(user_input) - 1
                 if 0 <= index < len(ports):
                     selected_port = ports[index].device
-                    print(f"[OK] Seleccionado: {selected_port}")
+                    arduino_ok(f"Seleccionado: {selected_port}")
                 else:
-                    print(f"[ERROR] Número inválido. Omitiendo Arduino")
+                    arduino_error("Número inválido. Omitiendo Arduino")
                     selected_port = None
             elif user_input:
                 # Usuario ingresó texto
                 if user_input.startswith('COM') or user_input.startswith('/dev/'):
                     selected_port = user_input
                 else:
-                    print(f"[ERROR] Formato inválido. Omitiendo Arduino")
+                    arduino_error("Formato inválido. Omitiendo Arduino")
                     selected_port = None
             else:
                 # Usuario presionó Enter
                 selected_port = None
-                print("[INFO] Modo solo detección - sin control Arduino")
+                info("Modo solo detección - sin control Arduino")
         
         # Intentar conectar Arduino
         if selected_port:
-            print(f"\n[ARDUINO] Conectando con puerto: {selected_port}")
+            arduino_info(f"Conectando con puerto: {selected_port}")
             if self.connect(selected_port):
-                print("🎉 Arduino listo para recibir señales de detección!")
+                arduino_ok("Arduino listo para recibir señales de detección!")
                 return True
             else:
-                print("[WARNING] Continuando sin Arduino - solo detección visual")
+                warning("Continuando sin Arduino - solo detección visual")
                 return False
         else:
-            print("[INFO] Modo solo detección - sin control Arduino")
+            info("Modo solo detección - sin control Arduino")
             return False

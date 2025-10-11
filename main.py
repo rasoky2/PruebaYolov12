@@ -7,6 +7,14 @@ from typing import Optional, Dict, Any, Tuple, Union
 import time
 from image import FilterManager
 from arduino import ArduinoManager
+from utils.logger import (
+    info, success, warning, error,
+    arduino_info,
+    detection_info, detection_error,
+    camera_log, camera_ok, camera_error,
+    filter_info_detailed, performance_info, yolo_info,
+    separator, title
+)
 
 # Variables globales para Arduino
 arduino_manager = None
@@ -30,10 +38,10 @@ def load_camera_config() -> Optional[Dict[str, Any]]:
             config = json.load(f)
         return config
     except FileNotFoundError:
-        print("[WARNING] Archivo camera_config.json no encontrado. Usando configuración por defecto.")
+        warning("Archivo camera_config.json no encontrado. Usando configuración por defecto.")
         return None
     except json.JSONDecodeError:
-        print("[ERROR] Error al leer camera_config.json. Usando configuración por defecto.")
+        error("Error al leer camera_config.json. Usando configuración por defecto.")
         return None
 
 def get_camera_name(cam_id: int, config: Optional[Dict[str, Any]]) -> str:
@@ -73,12 +81,52 @@ def assign_color(chestnut_type: str) -> Tuple[int, int, int]:
 
 # Funciones de filtros movidas a image/filters.py
 
+def detect_green_fluorescence(crop_img: np.ndarray) -> float:
+    """Detectar fluorescencia verde brillante específica de metabolitos fúngicos"""
+    if crop_img is None or crop_img.size == 0:
+        return 0.0
+    
+    # Convertir a HSV para análisis de color
+    hsv = cv2.cvtColor(crop_img, cv2.COLOR_BGR2HSV)
+    
+    # Definir rango de verde brillante fluorescente (verde neón)
+    # H: 60-85 (verde), S: 200-255 (muy saturado), V: 200-255 (muy brillante)
+    lower_green_fluor = np.array([60, 200, 200])
+    upper_green_fluor = np.array([85, 255, 255])
+    
+    # Crear máscara para fluorescencia verde
+    green_mask = cv2.inRange(hsv, lower_green_fluor, upper_green_fluor)
+    
+    # Calcular porcentaje de píxeles con fluorescencia verde
+    total_pixels = crop_img.shape[0] * crop_img.shape[1]
+    fluorescent_pixels = np.sum(green_mask > 0)
+    fluorescence_ratio = fluorescent_pixels / total_pixels
+    
+    # También detectar verde muy brillante en RGB (para casos extremos)
+    b, g, r = cv2.split(crop_img)
+    
+    # Buscar píxeles donde G >> R y G >> B (verde dominante y brillante)
+    green_dominant = (g > r * 1.5) & (g > b * 1.5) & (g > 200)
+    bright_green_ratio = np.sum(green_dominant) / total_pixels
+    
+    # Combinar ambas detecciones
+    total_fluorescence = fluorescence_ratio + bright_green_ratio
+    
+    return min(total_fluorescence, 1.0)  # Cap a 1.0
+
 def analyze_chestnut_quality(crop_img: Optional[np.ndarray]) -> str:
-    """Analizar calidad de castaña usando análisis HSV y textura"""
+    """Analizar calidad de castaña usando análisis HSV, textura y fluorescencia verde"""
     if crop_img is None or crop_img.size == 0:
         return 'sana'  # Por defecto si no se puede analizar
     
-    # Convertir a HSV para análisis de color
+    # NUEVA DETECCIÓN: Fluorescencia verde (contaminación fúngica)
+    fluorescence_score = detect_green_fluorescence(crop_img)
+    
+    # Si hay fluorescencia verde significativa, es contaminada
+    if fluorescence_score > 0.05:  # Más del 5% de fluorescencia verde
+        return 'contaminada'
+    
+    # Convertir a HSV para análisis de color tradicional
     hsv = cv2.cvtColor(crop_img, cv2.COLOR_BGR2HSV)
     _, s, v = cv2.split(hsv)  # Usar _ para variable no usada
     
@@ -97,6 +145,7 @@ def analyze_chestnut_quality(crop_img: Optional[np.ndarray]) -> str:
     # - Menor brillo (valores V bajos)
     # - Menor saturación (colores más grisáceos)
     # - Más bordes (manchas, moho, irregularidades)
+    # - Fluorescencia verde (ya detectada arriba)
     
     contamination_score = 0
     
@@ -120,27 +169,58 @@ def analyze_chestnut_quality(crop_img: Optional[np.ndarray]) -> str:
     if edge_density > 0.15:
         contamination_score += 1
     
+    # Factor 5: Fluorescencia verde (ya considerado arriba, pero agregar peso)
+    contamination_score += int(fluorescence_score * 10)  # Peso alto para fluorescencia
+    
     # Clasificar basado en puntuación
     return 'contaminada' if contamination_score >= 1 else 'sana'
 
 def analyze_chestnut_quality_dual(crop_img: Optional[np.ndarray], filter_manager: FilterManager = None) -> str:
-    """Análisis dual: RGB normal + simulación UV para máxima precisión"""
+    """Análisis dual: RGB normal + simulación UV + detección de fluorescencia verde para máxima precisión"""
     if crop_img is None or crop_img.size == 0:
         return 'sana'
     
-    # Análisis RGB normal
+    # Análisis RGB normal (incluye detección de fluorescencia verde)
     rgb_result = analyze_chestnut_quality(crop_img)
     
-    # Análisis con simulación UV usando FilterManager
+    # Análisis específico para fluorescencia UV-A si está disponible
+    uv_fluorescence_result = 'sana'
     if filter_manager:
-        uv_img, _, _ = filter_manager.apply_filter(crop_img, "uv")
-        uv_result = analyze_chestnut_quality(uv_img)
-    else:
-        # Fallback si no hay FilterManager
-        uv_result = rgb_result
+        try:
+            # Aplicar filtro UV-A fluorescencia si está disponible
+            uv_img, _, _ = filter_manager.apply_filter(crop_img, "uv_fluorescence")
+            if uv_img is not None:
+                # Detectar fluorescencia verde específicamente en imagen UV
+                fluorescence_score = detect_green_fluorescence(uv_img)
+                if fluorescence_score > 0.03:  # Umbral más bajo para UV (3%)
+                    uv_fluorescence_result = 'contaminada'
+                    detection_info(f"Fluorescencia UV detectada: {fluorescence_score:.3f}")
+        except Exception:
+            # Fallback si no hay filtro UV disponible
+            pass
     
-    # Lógica de decisión dual
-    final_result = 'contaminada' if (rgb_result == 'contaminada' or uv_result == 'contaminada') else 'sana'
+    # Análisis con filtro de grietas usando FilterManager
+    crack_result = 'sana'
+    if filter_manager:
+        try:
+            crack_img, _, _ = filter_manager.apply_filter(crop_img, "crack")
+            crack_result = analyze_chestnut_quality(crack_img)
+        except Exception:
+            crack_result = rgb_result
+    
+    # Lógica de decisión dual mejorada
+    # Si cualquiera de los análisis detecta contaminación, marcar como contaminada
+    final_result = 'contaminada' if (
+        rgb_result == 'contaminada' or 
+        crack_result == 'contaminada' or 
+        uv_fluorescence_result == 'contaminada'
+    ) else 'sana'
+    
+    # Log detallado si hay fluorescencia detectada
+    if final_result == 'contaminada':
+        fluorescence_score = detect_green_fluorescence(crop_img)
+        if fluorescence_score > 0.05:
+            detection_info(f"CONTAMINACIÓN DETECTADA - Fluorescencia verde: {fluorescence_score:.3f}")
     
     return final_result
 
@@ -191,17 +271,17 @@ def switch_camera(new_camera_id: int, available_cameras: list, current_camera_id
         if new_camera.isOpened():
             new_camera.set(3, 1280)  # Ancho
             new_camera.set(4, 720)   # Alto
-            print(f"[OK] Cambiado a cámara {new_camera_id}")
+            camera_ok(f"Cambiado a cámara {new_camera_id}")
             return new_camera_id, new_camera
         else:
-            print(f"[ERROR] No se pudo abrir cámara {new_camera_id}")
+            camera_error(f"No se pudo abrir cámara {new_camera_id}")
             # Restaurar cámara anterior
             old_camera = cv2.VideoCapture(current_camera_id)
             old_camera.set(3, 1280)
             old_camera.set(4, 720)
             return current_camera_id, old_camera
     else:
-        print(f"[ERROR] Cámara {new_camera_id} no disponible o ya seleccionada")
+        camera_error(f"Cámara {new_camera_id} no disponible o ya seleccionada")
         return current_camera_id, camera_live
 
 def create_dual_view(normal_img: np.ndarray, model: YOLO, conf: float = 0.5, filter_type: str = "nir", filter_manager: FilterManager = None) -> Tuple[np.ndarray, int, int, int]:
@@ -221,12 +301,12 @@ def create_dual_view(normal_img: np.ndarray, model: YOLO, conf: float = 0.5, fil
                 create_dual_view.frame_count = 1
                 
             if create_dual_view.frame_count % 60 == 0:  # Cada 2 segundos aprox
-                print("\n" + pipeline_desc)
+                filter_info_detailed(pipeline_desc)
         else:
             filtered_processed, filter_name, filter_desc = filter_manager.apply_filter(normal_img.copy(), filter_type)
     else:
         # Error si no hay FilterManager
-        print("[ERROR] FilterManager es requerido para create_dual_view")
+        error("FilterManager es requerido para create_dual_view")
         return normal_img, 0, 0, 0
     
     # ⚡ OPTIMIZACIÓN CRÍTICA: Solo una predicción YOLO (mejora 2x velocidad)
@@ -380,43 +460,43 @@ def predict(model: YOLO, img: np.ndarray, conf: float = 0.5, filter_manager: Fil
 
 def main_func():
     """Función principal para detección de castañas sanas y contaminadas"""
-    print("[CHESTNUT] Detector de Castañas - Análisis Dual RGB + UV Simulado + Arduino")
-    print("=" * 70)
-    print("[OK] Verde: Castañas SANAS (análisis HSV + textura + simulación UV)")
-    print("[ERROR] Rojo: Castañas CONTAMINADAS (moho, manchas, fluorescencia detectada)")
-    print("[AI] Método: YOLO12n detecta → Análisis dual RGB + UV simulado clasifica")
-    print("[TIP] UV Simulado: Detecta fluorescencia de moho y contaminación orgánica")
-    print("[ARDUINO] Arduino: Activa servo cuando detecta contaminación")
-    print("=" * 70)
+    title("Detector de Castañas - Análisis Óptico Avanzado + Arduino")
+    detection_info("Verde: Castañas SANAS (análisis HSV + textura + filtros ópticos)")
+    detection_error("Rojo: Castañas CONTAMINADAS (grietas, moho, hongos detectados)")
+    detection_error("NUEVO: Detección automática de fluorescencia verde neón (metabolitos fúngicos)")
+    yolo_info("Método: YOLO12n detecta → Análisis dual RGB + filtros ópticos especializados clasifica")
+    info("Filtros Ópticos: Grietas (polarización), UV-A (fluorescencia verde), NIR (humedad), Hongos")
+    info("Detección Fluorescencia: Verde neón = Contaminación fúngica (umbral >5% píxeles)")
+    arduino_info("Arduino: Activa servo cuando detecta contaminación")
     
     # Cargar configuración de cámaras
     camera_config = load_camera_config()
     
     # Inicializar sistema de filtros
     filter_manager = FilterManager()
-    print(f"[FILTER] Sistema de filtros inicializado (GPU: {'[OK]' if filter_manager.cuda_available else '[ERROR]'})")
+    filter_info_detailed(f"Sistema de filtros inicializado (GPU: {'✅' if filter_manager.cuda_available else '❌'})")
     
     # Cargar modelo YOLO12 preentrenado
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(script_dir, "core", "yolo12n.pt")
     
-    print(f"[SEARCH] Cargando modelo YOLO12n: {model_path}")
+    yolo_info(f"Cargando modelo YOLO12n: {model_path}")
     
     try:
         # Verificar disponibilidad de GPU
         import torch
         global device  # Declarar global al inicio
-        print(f"[SEARCH] Verificando GPU...")
-        print(f"   - PyTorch versión: {torch.__version__}")
-        print(f"   - CUDA disponible: {torch.cuda.is_available()}")
+        info("Verificando GPU...")
+        info(f"   - PyTorch versión: {torch.__version__}")
+        info(f"   - CUDA disponible: {torch.cuda.is_available()}")
         
         if torch.cuda.is_available():
-            print(f"   - GPU detectada: {torch.cuda.get_device_name(0)}")
-            print(f"   - Memoria GPU: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+            info(f"   - GPU detectada: {torch.cuda.get_device_name(0)}")
+            info(f"   - Memoria GPU: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
             device = "cuda"
-            print("[FAST] Usando GPU para YOLO")
+            performance_info("Usando GPU para YOLO")
         else:
-            print("[WARNING] GPU no disponible, usando CPU")
+            warning("GPU no disponible, usando CPU")
             device = "cpu"
         
         # Cargar modelo con dispositivo específico
@@ -425,13 +505,13 @@ def main_func():
         # Mover modelo a GPU si está disponible
         if torch.cuda.is_available():
             model.to(device)
-            print("[OK] Modelo YOLO12n cargado en GPU exitosamente")
+            yolo_info("Modelo YOLO12n cargado en GPU exitosamente")
         else:
-            print("[OK] Modelo YOLO12n cargado en CPU exitosamente")
+            yolo_info("Modelo YOLO12n cargado en CPU exitosamente")
             
     except Exception as e:
-        print(f"[ERROR] Error cargando modelo YOLO12: {e}")
-        print("🔄 Intentando con modelo YOLOv8 como respaldo...")
+        error(f"Error cargando modelo YOLO12: {e}")
+        info("Intentando con modelo YOLOv8 como respaldo...")
         try:
             backup_path = os.path.join(script_dir, "core", "yolov8n.pt")
             model = YOLO(backup_path)
@@ -439,24 +519,24 @@ def main_func():
             # Mover modelo de respaldo a GPU si está disponible
             if torch.cuda.is_available():
                 model.to(device)
-                print("[OK] Modelo YOLOv8 de respaldo cargado en GPU exitosamente")
+                yolo_info("Modelo YOLOv8 de respaldo cargado en GPU exitosamente")
             else:
-                print("[OK] Modelo YOLOv8 de respaldo cargado en CPU exitosamente")
+                yolo_info("Modelo YOLOv8 de respaldo cargado en CPU exitosamente")
         except Exception as e2:
-            print(f"[ERROR] Error cargando modelo de respaldo: {e2}")
+            error(f"Error cargando modelo de respaldo: {e2}")
             return
     
     # Mostrar información del modelo
-    print(f"📊 Información del modelo:")
-    print(f"   - Dispositivo: {device.upper()}")
-    print(f"   - Clases disponibles: {list(model.names.values())}")
-    print(f"   - Número de clases: {len(model.names)}")
+    info("Información del modelo:")
+    info(f"   - Dispositivo: {device.upper()}")
+    info(f"   - Clases disponibles: {list(model.names.values())}")
+    info(f"   - Número de clases: {len(model.names)}")
     
     # Mostrar rendimiento esperado
     if device == "cuda":
-        print(f"[FAST] Rendimiento: GPU acelerado - Detección ultra-rápida")
+        performance_info("Rendimiento: GPU acelerado - Detección ultra-rápida")
     else:
-        print(f"[WARNING] Rendimiento: CPU - Detección más lenta")
+        warning("Rendimiento: CPU - Detección más lenta")
     
     # Inicializar gestor de Arduino
     global arduino_manager
@@ -469,7 +549,7 @@ def main_func():
     available_cameras = []
     camera_info = {}
     
-    print("[SEARCH] Detectando cámaras disponibles...")
+    info("Detectando cámaras disponibles...")
     
     for i in range(5):
         cap = cv2.VideoCapture(i)
@@ -498,42 +578,42 @@ def main_func():
             cap.release()
     
     if not available_cameras:
-        print("[ERROR] No se encontraron cámaras disponibles")
+        camera_error("No se encontraron cámaras disponibles")
         return
     
     # Mostrar información detallada de las cámaras
-    print(f"\n📷 Cámaras disponibles ({len(available_cameras)} encontradas):")
-    print("-" * 70)
+    info(f"\nCámaras disponibles ({len(available_cameras)} encontradas):")
+    separator("-", 70, "CYAN")
     
     favorite_cam_id = None
     for cam_id in available_cameras:
-        info = camera_info[cam_id]
-        favorite_marker = " ⭐ FAVORITA" if info['is_favorite'] else ""
-        print(f"   📹 Cámara {cam_id}: {info['name']}{favorite_marker}")
+        cam_info = camera_info[cam_id]
+        favorite_marker = " (FAVORITA)" if cam_info['is_favorite'] else ""
+        camera_log(f"Cámara {cam_id}: {cam_info['name']}{favorite_marker}")
         
-        if info['description']:
-            print(f"      📝 {info['description']}")
+        if cam_info['description']:
+            info(f"      {cam_info['description']}")
         
-        print(f"      📐 Resolución: {info['resolution']} | FPS: {info['fps']:.1f}")
+        info(f"      Resolución: {cam_info['resolution']} | FPS: {cam_info['fps']:.1f}")
         
-        if info['is_favorite']:
+        if cam_info['is_favorite']:
             favorite_cam_id = cam_id
         print()
-    print("-" * 70)
+    separator("-", 70, "CYAN")
     
     # Seleccionar cámara (siempre preguntar al usuario)
     camera_id = None
     
     while camera_id is None:
         try:
-            print(f"\n🎯 Selección de cámara:")
-            print(f"   Cámaras disponibles: {available_cameras}")
+            info(f"\nSelección de cámara:")
+            info(f"   Cámaras disponibles: {available_cameras}")
             
             # Mostrar resúmen rápido de cada cámara
             for cam_id in available_cameras:
-                info = camera_info[cam_id]
-                favorite_marker = " ⭐" if info['is_favorite'] else ""
-                print(f"   {cam_id}: {info['name']}{favorite_marker} - {info['resolution']} @ {info['fps']:.0f}fps")
+                cam_info = camera_info[cam_id]
+                favorite_marker = " (FAVORITA)" if cam_info['is_favorite'] else ""
+                info(f"   {cam_id}: {cam_info['name']}{favorite_marker} - {cam_info['resolution']} @ {cam_info['fps']:.0f}fps")
             
             # Sugerir cámara favorita o por defecto
             default_cam = favorite_cam_id if favorite_cam_id else available_cameras[0]
@@ -542,35 +622,35 @@ def main_func():
             camera_choice = input(f"\nSelecciona una cámara ({available_cameras[0]}-{available_cameras[-1]}) o presiona Enter para usar la {default_text}: ").strip()
             
             if camera_choice == "":
-                # Usar cámara favorita o por defecto
+                # Usar cámara favorita o por defecto 
                 camera_id = default_cam
-                info = camera_info[camera_id]
-                favorite_text = " (FAVORITA)" if info['is_favorite'] else ""
-                print(f"[OK] Usando {default_text}: {info['name']} ({info['resolution']} @ {info['fps']:.0f}fps){favorite_text}")
+                cam_info = camera_info[camera_id]
+                favorite_text = " (FAVORITA)" if cam_info['is_favorite'] else ""
+                camera_ok(f"Usando {default_text}: {cam_info['name']} ({cam_info['resolution']} @ {cam_info['fps']:.0f}fps){favorite_text}")
             else:
                 camera_id = int(camera_choice)
                 if camera_id in available_cameras:
-                    info = camera_info[camera_id]
-                    favorite_text = " (FAVORITA)" if info['is_favorite'] else ""
-                    print(f"[OK] Cámara {camera_id} seleccionada: {info['name']} ({info['resolution']} @ {info['fps']:.0f}fps){favorite_text}")
+                    cam_info = camera_info[camera_id]
+                    favorite_text = " (FAVORITA)" if cam_info['is_favorite'] else ""
+                    camera_ok(f"Cámara {camera_id} seleccionada: {cam_info['name']} ({cam_info['resolution']} @ {cam_info['fps']:.0f}fps){favorite_text}")
                 else:
-                    print(f"[ERROR] Cámara {camera_id} no disponible. Intenta con una de estas: {available_cameras}")
+                    camera_error(f"Cámara {camera_id} no disponible. Intenta con una de estas: {available_cameras}")
                     camera_id = None  # Reiniciar el bucle
                     
         except ValueError:
-            print("[ERROR] Por favor ingresa un número válido")
+            error("Por favor ingresa un número válido")
             camera_id = None  # Reiniciar el bucle
         except (EOFError, KeyboardInterrupt):
-            print("\n[WARNING] Selección cancelada. Usando cámara favorita...")
+            warning("\nSelección cancelada. Usando cámara favorita...")
             camera_id = default_cam
-            info = camera_info[camera_id]
-            favorite_text = " (FAVORITA)" if info['is_favorite'] else ""
-            print(f"[OK] Usando cámara por defecto: {info['name']} ({info['resolution']} @ {info['fps']:.0f}fps){favorite_text}")
+            cam_info = camera_info[camera_id]
+            favorite_text = " (FAVORITA)" if cam_info['is_favorite'] else ""
+            camera_ok(f"Usando cámara por defecto: {cam_info['name']} ({cam_info['resolution']} @ {cam_info['fps']:.0f}fps){favorite_text}")
     
     camera_live = cv2.VideoCapture(camera_id)
     
     if not camera_live.isOpened():
-        print(f"[ERROR] No se pudo abrir la cámara {camera_id}")
+        camera_error(f"No se pudo abrir la cámara {camera_id}")
         return
     
     # Usar la resolución nativa de la cámara seleccionada
@@ -589,23 +669,27 @@ def main_func():
     actual_height = int(camera_live.get(cv2.CAP_PROP_FRAME_HEIGHT))
     actual_fps = camera_live.get(cv2.CAP_PROP_FPS)
     
-    print(f"[OK] Cámara configurada:")
-    print(f"   📹 Dispositivo: {selected_info['name']}")
+    camera_ok("Cámara configurada:")
+    info(f"   Dispositivo: {selected_info['name']}")
     if selected_info['description']:
-        print(f"   📝 Descripción: {selected_info['description']}")
-    print(f"   📐 Resolución: {actual_width}x{actual_height}")
-    print(f"   🎬 FPS: {actual_fps:.1f}")
+        info(f"   Descripción: {selected_info['description']}")
+    info(f"   Resolución: {actual_width}x{actual_height}")
+    info(f"   FPS: {actual_fps:.1f}")
     if selected_info['is_favorite']:
-        print(f"   ⭐ Estado: CÁMARA FAVORITA")
-    print("\n📋 Controles:")
-    print("   - ESC: Salir")
-    print("   - 'c': Cambiar confianza")
-    print("   - 's': Guardar captura")
-    print("   - 'i': Mostrar información del modelo")
-    print("   - 'm': Cambiar cámara")
-    print("   - 'f': Cambiar filtro (NIR/Spectral/Contraste/UV)")
-    print("   - 'o': Optimización manual (limpiar memoria)")
-    print("   - 'F': Mostrar información de filtros favoritos")
+        info(f"   Estado: CÁMARA FAVORITA")
+    
+    info("\nControles:")
+    info("   - ESC: Salir")
+    info("   - 'c': Cambiar confianza")
+    info("   - 's': Guardar captura")
+    info("   - 'i': Mostrar información del modelo")
+    info("   - 'm': Cambiar cámara")
+    info("   - 'f': Cambiar filtro (menú completo)")
+    info("   - 'F': Mostrar información de filtros favoritos")
+    info("   - 'o': Optimización manual (limpiar memoria)")
+    # Mostrar teclas rápidas desde configuración
+    quick_keys_help = filter_manager.get_quick_keys_help()
+    info(f"\n{quick_keys_help}")
     
     frame_count = 0
     total_sanas = 0
@@ -646,7 +730,7 @@ def main_func():
         if frame_skip_counter < frame_skip_interval:
             # Mostrar frame anterior sin procesar
             if 'dual_view' in locals():
-                cv2.imshow('[CHESTNUT] Vista Dual: Normal + UV Simulado', dual_view)
+                cv2.imshow('[CHESTNUT] Vista Dual: Normal + Filtros Ópticos Avanzados', dual_view)
                 key = cv2.waitKey(1) & 0xFF
                 if key == 27:  # ESC
                     break
@@ -662,7 +746,7 @@ def main_func():
                 import torch
                 torch.cuda.empty_cache()  # Limpiar cache de GPU
             frame_count_memory = 0
-            print(f"[OPTIMIZACIÓN] Memoria limpiada en frame {frame_count}")
+            performance_info(f"Memoria limpiada en frame {frame_count}")
         
         # Crear vista dual: cámara normal + filtro especializado
         dual_view, total_castanas, sanas, contaminadas = create_dual_view(frame, model, conf=confidence, filter_type=current_filter, filter_manager=filter_manager)
@@ -682,11 +766,11 @@ def main_func():
         if avg_processing_time > max_processing_time:
             frame_skip_interval = min(frame_skip_interval + 1, 4)  # Máximo salto de 3 frames
             if frame_count % 60 == 0:  # Cada 2 segundos aproximadamente
-                print(f"[OPTIMIZACIÓN] Sistema sobrecargado ({avg_processing_time:.3f}s), aumentando intervalo a {frame_skip_interval}")
+                performance_info(f"Sistema sobrecargado ({avg_processing_time:.3f}s), aumentando intervalo a {frame_skip_interval}")
         elif avg_processing_time < max_processing_time * 0.5 and frame_skip_interval > 1:
             frame_skip_interval = max(frame_skip_interval - 1, 1)  # Reducir intervalo si el sistema está bien
             if frame_count % 60 == 0:
-                print(f"[OPTIMIZACIÓN] Sistema estable ({avg_processing_time:.3f}s), reduciendo intervalo a {frame_skip_interval}")
+                performance_info(f"Sistema estable ({avg_processing_time:.3f}s), reduciendo intervalo a {frame_skip_interval}")
         
         # Calcular FPS cada 30 frames
         if fps_counter >= 30:
@@ -707,7 +791,7 @@ def main_func():
         processing_text = f"Proc: {avg_processing_time:.3f}s | Skip: {frame_skip_interval}"
         status_text = f"Frame: {frame_count} | {fps_text} | {processing_text} | Confianza: {confidence:.2f}"
         stats_text = f"Sanas: {total_sanas} | Contaminadas: {total_contaminadas}"
-        camera_text = f"Cámara: {camera_id} | Filtro: {current_filter.upper()} | Presiona 'f' para cambiar filtro"
+        camera_text = f"Cámara: {camera_id} | Filtro: {current_filter.upper()} | Teclas: 1-8 para filtros rápidos"
         
         # Información de Arduino
         if arduino_manager and arduino_manager.enabled:
@@ -737,7 +821,7 @@ def main_func():
             cv2.putText(dual_view, behavior_text, (10, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.35, signal_color, 1)
         
         # Mostrar vista dual
-        cv2.imshow('[CHESTNUT] Vista Dual: Normal + UV Simulado', dual_view)
+        cv2.imshow('[CHESTNUT] Vista Dual: Normal + Filtros Ópticos Avanzados', dual_view)
         
         # Manejar teclas
         key = cv2.waitKey(1) & 0xFF
@@ -749,80 +833,76 @@ def main_func():
                 new_conf = float(input(f"\nNueva confianza (actual: {confidence:.2f}): "))
                 if 0.1 <= new_conf <= 1.0:
                     confidence = new_conf
-                    print(f"[OK] Confianza actualizada: {confidence:.2f}")
+                    success(f"Confianza actualizada: {confidence:.2f}")
                 else:
-                    print("[ERROR] Confianza debe estar entre 0.1 y 1.0")
+                    error("Confianza debe estar entre 0.1 y 1.0")
             except (ValueError, EOFError, KeyboardInterrupt):
-                print("[ERROR] Valor inválido o entrada cancelada")
+                error("Valor inválido o entrada cancelada")
         elif key == ord('s'):
             # Guardar captura dual
             filename = f"captura_dual_{frame_count}.jpg"
             cv2.imwrite(filename, dual_view)
-            print(f"💾 Captura dual guardada: {filename}")
+            success(f"Captura dual guardada: {filename}")
         elif key == ord('i'):
             # Mostrar información
-            print(f"\n📊 Información actual:")
-            print(f"   - Frame actual: {frame_count}")
-            print(f"   - Confianza: {confidence:.2f}")
-            print(f"   - Castañas SANAS detectadas: {total_sanas}")
-            print(f"   - Castañas CONTAMINADAS detectadas: {total_contaminadas}")
-            print(f"   - Frames con castañas: {frames_con_castanas}")
-            print(f"   - Cámara actual: {camera_id}")
-            print(f"   - Clases detectadas: sports ball, apple, orange, donut, bowl")
-            print(f"   - IDs YOLO: 32, 47, 49, 54, 45")
-            print(f"   - Filtro actual: {current_filter.upper()}")
-            print(f"   - Clasificación Dual RGB + {current_filter.upper()}:")
-            print(f"     • Verde (Sana): análisis HSV + textura + filtro favorable")
-            print(f"     • Rojo (Contaminada): moho, manchas, contaminación detectada")
-            print(f"   - Factores analizados:")
-            print(f"     • RGB: Brillo (V), Saturación (S), Variación, Bordes")
-            if current_filter == "nir":
-                print(f"     • NIR Avanzado: Haralick, Watershed, Sobel, Morfología")
-            elif current_filter == "spectral":
-                print(f"     • Spectral: PCA, NDVI, Anomalías espectrales")
-            elif current_filter == "contrast":
-                print(f"     • Textura: LBP, Gradientes, Patrones irregulares")
+            info(f"\nInformación actual:")
+            info(f"   - Frame actual: {frame_count}")
+            info(f"   - Confianza: {confidence:.2f}")
+            info(f"   - Castañas SANAS detectadas: {total_sanas}")
+            info(f"   - Castañas CONTAMINADAS detectadas: {total_contaminadas}")
+            info(f"   - Frames con castañas: {frames_con_castanas}")
+            info(f"   - Cámara actual: {camera_id}")
+            info(f"   - Clases detectadas: sports ball, apple, orange, donut, bowl")
+            info(f"   - IDs YOLO: 32, 47, 49, 54, 45")
+            info(f"   - Filtro actual: {current_filter.upper()}")
+            info(f"   - Clasificación Dual RGB + {current_filter.upper()}:")
+            info(f"     • Verde (Sana): análisis HSV + textura + filtro favorable")
+            info(f"     • Rojo (Contaminada): grietas, moho, hongos detectados")
+            info(f"   - Factores analizados:")
+            info(f"     • RGB: Brillo (V), Saturación (S), Variación, Bordes")
+            info(f"     • NUEVO: Fluorescencia verde neón (metabolitos fúngicos)")
+            info(f"     • Umbral fluorescencia: >5% píxeles = CONTAMINADA")
+            if current_filter == "crack":
+                info(f"     • Grietas: Polarización óptica, Hough lines, análisis de sombras")
             elif current_filter == "mold":
-                print(f"     • Moho: Manchas oscuras, colores verdes/azules, morfología")
-            elif current_filter == "rot":
-                print(f"     • Podredumbre: Baja textura, amarronamiento, suavización")
+                info(f"     • Moho: Manchas oscuras, colores verdes/azules, morfología")
             elif current_filter == "fungal":
-                print(f"     • Hongos: Círculos (esporas), redes (micelio), patrones")
-            elif current_filter == "mycotoxin":
-                print(f"     • Micotoxinas: Decoloraciones amarronadas/verdosas, texturas granulares")
-            elif current_filter == "aflatoxin":
-                print(f"     • Aflatoxinas: Fluorescencia azul-verde, patrones de red (Aspergillus)")
-            elif current_filter == "discoloration":
-                print(f"     • Decoloración: Análisis multi-espectral, patrones de difusión")
+                info(f"     • Hongos: Círculos (esporas), redes (micelio), patrones")
             elif current_filter == "mold_texture":
-                print(f"     • Textura Moho: Granular (Penicillium), Fibroso (Aspergillus), Algodonoso (Fusarium)")
+                info(f"     • Textura Moho: Granular (Penicillium), Fibroso (Aspergillus), Algodonoso (Fusarium)")
             elif current_filter == "spore_detection":
-                print(f"     • Esporas: Detección de círculos pequeños, agrupaciones, análisis de forma")
-            elif current_filter == "brazil_chestnut":
-                print(f"     • Castaña Brasileña: Color marrón-dorado, grietas en cáscara, manchas específicas")
+                info(f"     • Esporas: Detección de círculos pequeños, agrupaciones, análisis de forma")
+            elif current_filter == "uv_fluorescence":
+                info(f"     • UV-A Fluorescencia: Simulación ~365nm, filtro paso de banda BP470-505nm")
+                info(f"       - Detecta fluorescencia de metabolitos fúngicos (verde brillante)")
+                info(f"       - NUEVO: Detección automática de fluorescencia verde neón")
+                info(f"       - Umbral: >5% píxeles con fluorescencia = CONTAMINADA")
+            elif current_filter == "nir_enhanced":
+                info(f"     • NIR Mejorado: Simulación 700-1100nm, absorción diferencial")
+                info(f"       - Detecta humedad y variaciones internas no visibles")
             elif current_filter == "pipeline":
-                print(f"     • Pipeline Completo: Combina 7 filtros relevantes para análisis exhaustivo")
-                print(f"       - Normalización → Decoloración → Textura Moho → Hongos → Esporas → Micotoxinas → Aflatoxinas")
-                print(f"       - Score total de contaminación con recomendaciones automáticas")
+                info(f"     • Pipeline Óptico Avanzado: Filtros especializados combinados")
+                info(f"       - Grietas → UV-A → NIR → Textura → Hongos → Esporas")
+                info(f"       - Score total con tecnología óptica avanzada")
             else:
-                print(f"     • UV: Fluorescencia, contraste mejorado")
+                info(f"     • Análisis estándar: Detección general")
         elif key == ord('m'):
             # Cambiar cámara
-            print(f"\n📷 Cámaras disponibles: {available_cameras}")
-            print(f"   Cámara actual: {camera_id}")
+            info(f"\nCámaras disponibles: {available_cameras}")
+            info(f"   Cámara actual: {camera_id}")
             try:
                 new_camera = input(f"Selecciona una nueva cámara ({available_cameras[0]}-{available_cameras[-1]}): ").strip()
                 if new_camera != "":
                     new_camera_id = int(new_camera)
                     if new_camera_id == camera_id:
-                        print(f"[WARNING] Ya estás usando la cámara {camera_id}")
+                        warning(f"Ya estás usando la cámara {camera_id}")
                     else:
                         camera_id, camera_live = switch_camera(new_camera_id, available_cameras, camera_id, camera_live)
             except (ValueError, EOFError, KeyboardInterrupt):
-                print("[ERROR] Entrada inválida o cancelada")
+                error("Entrada inválida o cancelada")
         elif key == ord('f'):
             # Cambiar filtro usando configuración
-            print(f"\n🔬 Filtros disponibles:")
+            info(f"\n🔬 Filtros disponibles:")
             
             # Obtener filtros por categoría desde configuración
             categories = filter_manager.get_filters_by_category()
@@ -830,7 +910,7 @@ def main_func():
             
             filter_counter = 1
             filter_mapping = {}
-            
+                
             # Mostrar filtros por categoría
             category_names = {
                 "básico": "FILTROS BÁSICOS",
@@ -843,18 +923,18 @@ def main_func():
             for category, filters in categories.items():
                 if filters:  # Solo mostrar categorías con filtros
                     category_display = category_names.get(category, category.upper())
-                    print(f"   === {category_display} ===")
+                    info(f"   === {category_display} ===")
                     
-                    for filter_info in filters:
-                        favorite_marker = " ⭐" if filter_info["is_favorite"] else ""
-                        print(f"   {filter_counter}. {filter_info['name']}{favorite_marker} - {filter_info['description']}")
-                        filter_mapping[str(filter_counter)] = filter_info["type"]
+                    for filter_info_item in filters:
+                        favorite_marker = " (FAVORITA)" if filter_info_item["is_favorite"] else ""
+                        info(f"   {filter_counter}. {filter_info_item['name']}{favorite_marker} - {filter_info_item['description']}")
+                        filter_mapping[str(filter_counter)] = filter_info_item["type"]
                         filter_counter += 1
                     print()
             
-            print(f"   Filtro actual: {current_filter.upper()}")
+            info(f"   Filtro actual: {current_filter.upper()}")
             if favorite_filters:
-                print(f"   Filtros favoritos: {', '.join(favorite_filters)}")
+                info(f"   Filtros favoritos: {', '.join(favorite_filters)}")
             try:
                 filter_choice = input(f"Selecciona filtro (1-{filter_counter-1}): ").strip()
                 
@@ -864,50 +944,50 @@ def main_func():
                     current_filter = selected_filter
                     
                     # Obtener información del filtro desde configuración
-                    filter_info = filter_manager.get_filter_info_from_config(selected_filter)
-                    filter_name = filter_info["name"]
-                    filter_desc = filter_info.get("description", "")
+                    filter_info_item = filter_manager.get_filter_info_from_config(selected_filter)
+                    filter_name = filter_info_item["name"]
+                    filter_desc = filter_info_item.get("description", "")
                     
-                    print(f"[OK] Cambiado a filtro {filter_name} {filter_desc}")
+                    success(f"Cambiado a filtro {filter_name} {filter_desc}")
                     
                     # Mostrar información adicional si es pipeline
                     if selected_filter == "pipeline":
-                        print("[INFO] El pipeline combina automáticamente los 7 filtros más relevantes")
-                        print("[INFO] Análisis completo: normalización → decoloración → textura moho → hongos → esporas → micotoxinas → aflatoxinas")
+                        info("El pipeline combina automáticamente filtros de grietas y hongos")
+                        info("Análisis completo: grietas → textura moho → hongos → esporas")
                     
                 else:
-                    print("[ERROR] Opción inválida")
+                    error("Opción inválida")
             except (ValueError, EOFError, KeyboardInterrupt):
-                print("[ERROR] Entrada inválida o cancelada")
+                error("Entrada inválida o cancelada")
         elif key == ord('F'):
             # Mostrar información de filtros favoritos
-            print(f"\n⭐ Filtros favoritos configurados:")
+            info(f"\nFiltros favoritos configurados:")
             favorite_filters = filter_manager.get_favorite_filters()
             
             if favorite_filters:
                 for filter_type in favorite_filters:
-                    filter_info = filter_manager.get_filter_info_from_config(filter_type)
-                    category = filter_info.get("category", "desconocido")
-                    recommended = filter_info.get("recommended_for", "")
-                    print(f"   • {filter_info['name']} ({filter_type})")
-                    print(f"     Categoría: {category}")
+                    filter_info_item = filter_manager.get_filter_info_from_config(filter_type)
+                    category = filter_info_item.get("category", "desconocido")
+                    recommended = filter_info_item.get("recommended_for", "")
+                    info(f"   • {filter_info_item['name']} ({filter_type})")
+                    info(f"     Categoría: {category}")
                     if recommended:
-                        print(f"     Recomendado para: {recommended}")
+                        info(f"     Recomendado para: {recommended}")
                     print()
                 
-                print(f"📋 Filtro por defecto: {filter_manager.default_filter}")
-                print(f"💡 Para cambiar favoritos, edita filter_config.json")
+                info(f"Filtro por defecto: {filter_manager.default_filter}")
+                info(f"Para cambiar favoritos, edita filter_config.json")
             else:
-                print("   No hay filtros marcados como favoritos")
-                print(f"   Filtro por defecto: {filter_manager.default_filter}")
+                info("   No hay filtros marcados como favoritos")
+                info(f"   Filtro por defecto: {filter_manager.default_filter}")
         elif key == ord('o'):
             # Optimización manual
-            print(f"\n🔧 Optimización manual:")
-            print(f"   - Frame actual: {frame_count}")
-            print(f"   - FPS actual: {current_fps:.1f}")
-            print(f"   - Tiempo promedio procesamiento: {avg_processing_time:.3f}s")
-            print(f"   - Intervalo de salto: {frame_skip_interval}")
-            print(f"   - Memoria GPU/CPU: Limpiando...")
+            info(f"\nOptimización manual:")
+            info(f"   - Frame actual: {frame_count}")
+            info(f"   - FPS actual: {current_fps:.1f}")
+            info(f"   - Tiempo promedio procesamiento: {avg_processing_time:.3f}s")
+            info(f"   - Intervalo de salto: {frame_skip_interval}")
+            info(f"   - Memoria GPU/CPU: Limpiando...")
             
             # Limpieza forzada de memoria
             import gc
@@ -920,7 +1000,19 @@ def main_func():
             processing_times.clear()
             frame_skip_interval = 2  # Resetear a valor por defecto
             
-            print(f"   ✅ Memoria limpiada y contadores reseteados")
+            success(f"   ✅ Memoria limpiada y contadores reseteados")
+        
+        # Teclas rápidas para filtros (desde configuración)
+        else:
+            # Verificar si es una tecla rápida de filtro
+            quick_key = chr(key)
+            filter_type = filter_manager.get_filter_by_quick_key(quick_key)
+            
+            if filter_type:
+                current_filter = filter_type
+                filter_info = filter_manager.get_filter_info_from_config(filter_type)
+                filter_name = filter_info["name"]
+                success(f"Filtro cambiado a: {filter_name}")
     
     # Limpiar recursos
     camera_live.release()
@@ -928,17 +1020,17 @@ def main_func():
     if arduino_manager:
         arduino_manager.disconnect()
     
-    print(f"\n📊 Estadísticas finales:")
-    print(f"   - Frames procesados: {frame_count}")
-    print(f"   - Frames con castañas: {frames_con_castanas}")
-    print(f"   - Total castañas SANAS: {total_sanas}")
-    print(f"   - Total castañas CONTAMINADAS: {total_contaminadas}")
-    print(f"   - Total castañas detectadas: {total_sanas + total_contaminadas}")
+    info(f"\nEstadísticas finales:")
+    info(f"   - Frames procesados: {frame_count}")
+    info(f"   - Frames con castañas: {frames_con_castanas}")
+    info(f"   - Total castañas SANAS: {total_sanas}")
+    info(f"   - Total castañas CONTAMINADAS: {total_contaminadas}")
+    info(f"   - Total castañas detectadas: {total_sanas + total_contaminadas}")
     if (total_sanas + total_contaminadas) > 0:
-        print(f"   - Porcentaje de castañas sanas: {(total_sanas/(total_sanas + total_contaminadas)*100):.1f}%")
-        print(f"   - Porcentaje de castañas contaminadas: {(total_contaminadas/(total_sanas + total_contaminadas)*100):.1f}%")
-    print(f"   - Porcentaje de frames con detección: {(frames_con_castanas/frame_count*100):.1f}%")
-    print("[OK] Detección de castañas completada")
+        info(f"   - Porcentaje de castañas sanas: {(total_sanas/(total_sanas + total_contaminadas)*100):.1f}%")
+        info(f"   - Porcentaje de castañas contaminadas: {(total_contaminadas/(total_sanas + total_contaminadas)*100):.1f}%")
+    info(f"   - Porcentaje de frames con detección: {(frames_con_castanas/frame_count*100):.1f}%")
+    success("Detección de castañas completada")
 
 if __name__ == "__main__":
     main_func()
