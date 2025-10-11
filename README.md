@@ -12,18 +12,12 @@ Sistema de detección y clasificación de castañas brasileñas usando inteligen
 
 ## 🚀 Instalación
 
-1. Clona el repositorio:
-```bash
-git clone https://github.com/rasoky2/PruebaYolov12.git
-cd PruebaYolov12
-```
-
-2. Instala las dependencias:
+1. Instala las dependencias:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Ejecuta el detector:
+2. Ejecuta el detector:
 ```bash
 python main.py
 ```
@@ -96,6 +90,3 @@ Configura filtros favoritos en `filter_config.json`:
     }
 }
 ```
-
-
-**Desarrollado con ❤️ para la industria de castañas brasileñas**
