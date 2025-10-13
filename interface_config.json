@@ -1,0 +1,36 @@
+{
+    "colors": {
+        "sana": "#00FF00",
+        "contaminada": "#FF0000", 
+        "detectada": "#FFFF00",
+        "fondo": "#2C3E50"
+    },
+    "rgb_parameters": {
+        "brightness_low": 70,
+        "brightness_medium": 100,
+        "variation_threshold": 35.0,
+        "edge_density_threshold": 0.15,
+        "contamination_threshold": 1
+    },
+    "detection_classes": [
+        "sports ball",
+        "apple", 
+        "orange",
+        "donut",
+        "bowl",
+        "carrot",
+        "banana"
+    ],
+    "camera_settings": {
+        "default_camera": 0,
+        "resolution_width": 640,
+        "resolution_height": 480,
+        "fps": 30
+    },
+    "interface_settings": {
+        "window_size": "1200x800",
+        "video_size": "400x300",
+        "max_detections_display": 50,
+        "auto_save_config": true
+    }
+}
