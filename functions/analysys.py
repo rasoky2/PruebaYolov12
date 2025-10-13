@@ -5,12 +5,101 @@ Sistema de detección de estado de madurez y daño basado en análisis de color 
 
 import cv2
 import numpy as np
-from typing import Optional
+import json
+import os
+from typing import Optional, List
+
+
+def load_interface_config() -> dict:
+    """Cargar configuración desde interface_config.json"""
+    try:
+        # Obtener la ruta del archivo de configuración
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        config_path = os.path.join(current_dir, "interface_config.json")
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            print(f"✅ Configuración cargada desde: {config_path}")
+            return config
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"❌ Error cargando interface_config.json: {e}")
+        print("🔄 Usando configuración por defecto")
+        return {
+            "detection_classes": ["apple", "orange"],
+            "colors": {
+                "sana": "#00FF00",
+                "contaminada": "#FF0000",
+                "detectada": "#FFFF00"
+            }
+        }
+
+
+def get_detection_classes() -> List[str]:
+    """Obtener las clases de detección desde la configuración"""
+    config = load_interface_config()
+    classes = config.get("detection_classes", ["apple", "orange"])
+    print(f"🎯 Clases de detección disponibles: {classes}")
+    return classes
+
+
+def analyze_object_quality(crop_img: Optional[np.ndarray], object_class: str = "apple") -> str:
+    """
+    Analizar calidad de objeto detectado usando análisis RGB + detección de textura + huecos
+    
+    Args:
+        crop_img: Imagen recortada del objeto detectado
+        object_class: Tipo de objeto ('apple', 'orange', 'sports ball', etc.)
+        
+    Returns:
+        str: 'sana', 'contaminada' o 'indeterminada'
+    """
+    if crop_img is None or crop_img.size == 0:
+        return 'indeterminada'
+    
+    # PRIORIDAD 1: Detectar huecos/agujeros (daño severo)
+    hole_analysis = detect_holes_and_cavities(crop_img)
+    if hole_analysis['has_holes'] and hole_analysis['hole_confidence'] > 0.9:
+        return 'contaminada'  # Si tiene huecos significativos, es contaminada
+    
+    # PRIORIDAD 2: Detectar contornos irregulares (daño estructural) - DESHABILITADO PERMANENTEMENTE
+    # El algoritmo falla completamente y causa falsos positivos masivos
+    # contour_analysis = detect_irregular_contours(crop_img)
+    # if contour_analysis['is_irregular'] and contour_analysis['irregularity_score'] > 0.5:
+    #     return 'contaminada'  # Si tiene contornos muy irregulares, es contaminada
+    
+    # PRIORIDAD 3: Detectar textura dañada/arrugada
+    texture_analysis = detect_wrinkled_texture(crop_img)
+    if texture_analysis['is_wrinkled']:
+        return 'contaminada'  # Si está arrugada/dañada, es contaminada
+    
+    # PRIORIDAD 4: Detectar manchas oscuras/podredumbre
+    if detect_dark_spots(crop_img):
+        return 'contaminada'  # Si tiene manchas oscuras significativas, es contaminada
+    
+    # PRIORIDAD 4.5: Detectar rayas verticales de podredumbre
+    if detect_vertical_rot_streaks(crop_img):
+        return 'contaminada'  # Si tiene rayas de podredumbre, es contaminada
+    
+    # PRIORIDAD 5: Análisis RGB específico por tipo de objeto
+    dominant_color = get_dominant_rgb_color(crop_img)
+    color_result = classify_object_by_color_and_type(dominant_color, object_class)
+    
+    # Debug: Mostrar análisis completo
+    print(f"🔍 DEBUG COMPLETO - {object_class.upper()}:")
+    print(f"  - RGB: {dominant_color}")
+    print(f"  - Resultado color: {color_result}")
+    print(f"  - Huecos: {hole_analysis['has_holes']} (confianza: {hole_analysis['hole_confidence']:.2f}, límite: 0.90)")
+    print(f"  - Contornos: DESHABILITADO")
+    print(f"  - Textura: {texture_analysis['is_wrinkled']} (confianza: {texture_analysis['wrinkle_confidence']:.2f})")
+    print(f"  - Manchas oscuras: {detect_dark_spots(crop_img)} (límite: 35%)")
+    print(f"  - Rayas verticales: {detect_vertical_rot_streaks(crop_img)}")
+    
+    return color_result
 
 
 def analyze_apple_quality(crop_img: Optional[np.ndarray]) -> str:
     """
-    Analizar calidad de manzana usando análisis RGB + detección de arrugas
+    Analizar calidad de manzana usando análisis RGB + detección de arrugas (COMPATIBILIDAD)
     
     Args:
         crop_img: Imagen recortada de la manzana detectada
@@ -18,17 +107,260 @@ def analyze_apple_quality(crop_img: Optional[np.ndarray]) -> str:
     Returns:
         str: 'verde' o 'malograda'
     """
-    if crop_img is None or crop_img.size == 0:
+    result = analyze_object_quality(crop_img, "apple")
+    # Convertir resultado nuevo a formato anterior para compatibilidad
+    if result == 'sana':
+        return 'verde'
+    elif result == 'contaminada':
+        return 'malograda'
+    else:
         return 'indeterminada'
+
+
+def detect_holes_and_cavities(crop_img: np.ndarray) -> dict[str, any]:
+    """
+    Detectar huecos, agujeros y cavidades en objetos usando análisis de contornos
     
-    # PRIORIDAD 1: Detectar arrugas/textura (manzanas muy arrugadas)
-    texture_analysis = detect_wrinkled_texture(crop_img)
-    if texture_analysis['is_wrinkled']:
-        return 'malograda'  # Si está arrugada, es malograda
+    Args:
+        crop_img: Imagen recortada del objeto
+        
+    Returns:
+        dict: Información sobre huecos detectados y confianza
+    """
+    try:
+        # Convertir a escala de grises
+        gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
+        
+        # Aplicar filtro gaussiano para suavizar
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Detectar bordes usando Canny
+        edges = cv2.Canny(blurred, 30, 100)
+        
+        # Encontrar contornos
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            return {
+                'has_holes': False,
+                'hole_count': 0,
+                'largest_hole_area': 0,
+                'hole_confidence': 0.0
+            }
+        
+        # Ordenar contornos por área (de mayor a menor)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        
+        # El contorno más grande debería ser el objeto principal
+        main_contour = contours[0]
+        main_area = cv2.contourArea(main_contour)
+        
+        # Buscar contornos internos (huecos)
+        holes = []
+        for contour in contours[1:]:  # Excluir el contorno principal
+            area = cv2.contourArea(contour)
+        # Solo considerar contornos significativos (más del 40% del área principal)
+        # Aumentado aún más para reducir falsos positivos
+        if area > main_area * 0.40:
+                holes.append(contour)
+        
+        # Análisis de huecos
+        hole_count = len(holes)
+        has_holes = hole_count > 0
+        
+        # Calcular área del hueco más grande
+        largest_hole_area = 0
+        if holes:
+            largest_hole_area = max(cv2.contourArea(hole) for hole in holes)
+        
+        # Calcular confianza basada en el tamaño relativo del hueco
+        hole_confidence = 0.0
+        if has_holes and main_area > 0:
+            relative_hole_area = largest_hole_area / main_area
+            # Si el hueco es más del 20% del área total, es muy probable que sea daño
+            # Aumentado de 10% a 20% para reducir falsos positivos
+            hole_confidence = min(1.0, relative_hole_area * 5)
+        
+        return {
+            'has_holes': has_holes,
+            'hole_count': hole_count,
+            'largest_hole_area': largest_hole_area,
+            'hole_confidence': hole_confidence,
+            'relative_hole_area': largest_hole_area / main_area if main_area > 0 else 0
+        }
+        
+    except Exception as e:
+        print(f"Error detectando huecos: {e}")
+        return {
+            'has_holes': False,
+            'hole_count': 0,
+            'largest_hole_area': 0,
+            'hole_confidence': 0.0
+        }
+
+
+def detect_dark_spots(crop_img: np.ndarray) -> bool:
+    """
+    Detectar manchas oscuras/podredumbre en objetos
     
-    # PRIORIDAD 2: Análisis RGB para el resto
-    dominant_color = get_dominant_rgb_color(crop_img)
-    return classify_apple_by_color(dominant_color)
+    Args:
+        crop_img: Imagen recortada del objeto
+        
+    Returns:
+        bool: True si tiene manchas oscuras significativas
+    """
+    try:
+        # Convertir a escala de grises
+        gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
+        
+        # Aplicar umbral para detectar píxeles oscuros
+        # Píxeles con intensidad menor a 120 se consideran oscuros (más sensible)
+        dark_threshold = 120
+        dark_pixels = cv2.threshold(gray, dark_threshold, 255, cv2.THRESH_BINARY_INV)[1]
+        
+        # Contar píxeles oscuros
+        dark_pixel_count = cv2.countNonZero(dark_pixels)
+        total_pixels = crop_img.shape[0] * crop_img.shape[1]
+        dark_pixel_ratio = dark_pixel_count / total_pixels
+        
+        # Si más del 35% de la imagen son píxeles oscuros, es contaminada (más permisivo)
+        has_dark_spots = dark_pixel_ratio > 0.35
+        
+        if has_dark_spots:
+            print(f"🔍 MANCHAS OSCURAS detectadas: {dark_pixel_ratio:.1%} de píxeles oscuros")
+        
+        return has_dark_spots
+        
+    except Exception as e:
+        print(f"Error detectando manchas oscuras: {e}")
+        return False
+
+
+def detect_vertical_rot_streaks(crop_img: np.ndarray) -> bool:
+    """
+    Detectar rayas verticales de podredumbre en objetos
+    
+    Args:
+        crop_img: Imagen recortada del objeto
+        
+    Returns:
+        bool: True si tiene rayas verticales de podredumbre
+    """
+    try:
+        # Convertir a escala de grises
+        gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
+        
+        # Aplicar umbral para detectar píxeles oscuros (aún más sensible)
+        dark_threshold = 110
+        dark_pixels = cv2.threshold(gray, dark_threshold, 255, cv2.THRESH_BINARY_INV)[1]
+        
+        # Aplicar morfología para conectar píxeles cercanos (kernel más alto y apertura+cierre)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 25))  # Kernel vertical
+        morphed = cv2.morphologyEx(dark_pixels, cv2.MORPH_OPEN, kernel)
+        morphed = cv2.morphologyEx(morphed, cv2.MORPH_CLOSE, kernel)
+        
+        # Encontrar contornos
+        contours, _ = cv2.findContours(morphed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            return False
+        
+        # Analizar cada contorno
+        for contour in contours:
+            # Calcular área del contorno
+            area = cv2.contourArea(contour)
+            
+            # Calcular bounding box
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Verificar si es una raya vertical (más alta que ancha)
+            if h > w * 1.5 and area > 25:  # Raya vertical significativa (más sensible)
+                # Verificar si ocupa una buena parte de la altura del objeto
+                height_ratio = h / crop_img.shape[0]
+                if height_ratio > 0.20:  # Al menos 20% de la altura (más sensible)
+                    # Comprobar que la franja sea realmente OSCURA (promedio < 90)
+                    stripe_roi = gray[y:y+h, x:x+w]
+                    if stripe_roi.size == 0:
+                        continue
+                    mean_intensity = float(np.mean(stripe_roi))
+                    if mean_intensity < 90:  # oscuridad suficiente
+                        print(f"🔍 RAYA VERTICAL de podredumbre detectada: {height_ratio:.1%} de altura, intensidad media {mean_intensity:.1f}")
+                        return True
+                    else:
+                        # Raya clara: ignorar (reduce falsos positivos)
+                        continue
+        
+        return False
+        
+    except Exception as e:
+        print(f"Error detectando rayas de podredumbre: {e}")
+        return False
+
+
+def detect_irregular_contours(crop_img: np.ndarray) -> dict[str, any]:
+    """
+    Detectar contornos irregulares que pueden indicar daño severo
+    
+    Args:
+        crop_img: Imagen recortada del objeto
+        
+    Returns:
+        dict: Información sobre irregularidades en contornos
+    """
+    try:
+        # Convertir a escala de grises
+        gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
+        
+        # Aplicar filtro gaussiano
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Detectar bordes
+        edges = cv2.Canny(blurred, 30, 100)
+        
+        # Encontrar contornos
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            return {
+                'is_irregular': False,
+                'irregularity_score': 0.0,
+                'contour_solidity': 1.0
+            }
+        
+        # Encontrar el contorno más grande (objeto principal)
+        main_contour = max(contours, key=cv2.contourArea)
+        
+        # Calcular solidez del contorno (área / área del casco convexo)
+        area = cv2.contourArea(main_contour)
+        hull = cv2.convexHull(main_contour)
+        hull_area = cv2.contourArea(hull)
+        
+        if hull_area > 0:
+            solidity = area / hull_area
+        else:
+            solidity = 1.0
+        
+        # Calcular irregularidad basada en la solidez
+        # Solidez cercana a 1.0 = contorno regular
+        # Solidez baja = contorno irregular (posible daño)
+        irregularity_score = 1.0 - solidity
+        
+        # Considerar irregular si la solidez es menor a 0.3 (muy permisivo)
+        is_irregular = solidity < 0.3
+        
+        return {
+            'is_irregular': is_irregular,
+            'irregularity_score': irregularity_score,
+            'contour_solidity': solidity
+        }
+        
+    except Exception as e:
+        print(f"Error detectando contornos irregulares: {e}")
+        return {
+            'is_irregular': False,
+            'irregularity_score': 0.0,
+            'contour_solidity': 1.0
+        }
 
 
 def detect_wrinkled_texture(crop_img: np.ndarray) -> dict[str, any]:
@@ -126,6 +458,30 @@ def get_dominant_rgb_color(crop_img: np.ndarray) -> tuple[int, int, int]:
     return int(mean_r), int(mean_g), int(mean_b)
 
 
+def classify_object_by_color_and_type(rgb_color: tuple[int, int, int], object_class: str) -> str:
+    """
+    Clasificar objeto según su color RGB dominante y tipo
+    
+    Args:
+        rgb_color: Color RGB (R, G, B)
+        object_class: Tipo de objeto ('apple', 'orange', 'sports ball', etc.)
+        
+    Returns:
+        str: 'sana' o 'contaminada'
+    """
+    r, g, b = rgb_color
+    
+    # Clasificación específica por tipo de objeto
+    if object_class.lower() == "apple":
+        return classify_apple_by_color(rgb_color)
+    elif object_class.lower() == "orange":
+        return classify_orange_by_color(rgb_color)
+    
+    else:
+        # Para otros objetos, usar análisis genérico
+        return classify_generic_object_by_color(rgb_color)
+
+
 def classify_apple_by_color(rgb_color: tuple[int, int, int]) -> str:
     """
     Clasificar manzana según su color RGB dominante
@@ -135,57 +491,127 @@ def classify_apple_by_color(rgb_color: tuple[int, int, int]) -> str:
         rgb_color: Color RGB (R, G, B)
         
     Returns:
-        str: 'verde' o 'malograda'
+        str: 'sana' o 'contaminada'
     """
     r, g, b = rgb_color
     
-    # PRIORIDAD 1: Si tiene colores muy oscuros (definitivamente malograda)
-    if r < 80 and g < 80 and b < 60:  # Colores muy oscuros/marrones
-        return 'malograda'
+    # PRIORIDAD 1: Si tiene colores muy oscuros (definitivamente contaminada)
+    if r < 100 and g < 100 and b < 80:  # Colores muy oscuros/marrones (más estricto)
+        return 'contaminada'
     
-    # PRIORIDAD 2: Si tiene colores marrones/terrosos (malograda)
-    if r < 120 and g < 100 and b < 70:  # Colores marrones claramente
-        return 'malograda'
+    # PRIORIDAD 2: Si tiene colores marrones/terrosos (contaminada)
+    if r < 140 and g < 120 and b < 90:  # Colores marrones claramente (más estricto)
+        return 'contaminada'
     
     # PRIORIDAD 2.5: Si tiene manchas marrones (variación de color alta)
     # Detectar si hay zonas muy oscuras vs zonas claras (manchas)
-    if r < 150 and g < 140 and b < 90:  # Colores más oscuros/marrones
-        return 'malograda'
+    # HACER MÁS PERMISIVO para manzanas verdes
+    if r < 120 and g < 100 and b < 70:  # Solo colores muy oscuros/marrones
+        return 'contaminada'
     
-    # PRIORIDAD 3: Si el verde es dominante (probablemente verde)
+    # PRIORIDAD 3: Si el verde es dominante (probablemente sana)
     max_channel = max(r, g, b)
     
     # Si el verde es el canal más alto y es significativo
-    if g == max_channel and g > 120:  # Verde dominante
-        return 'verde'
+    if g == max_channel and g > 100:  # Verde dominante (más permisivo)
+        return 'sana'
     
     # PRIORIDAD 4: Rango específico para manzanas VERDES frescas (más amplio)
-    # Verde: RGB (140-220, 160-240, 80-150) - Manzanas frescas y saludables
-    if 140 <= r <= 220 and 160 <= g <= 240 and 80 <= b <= 150:
-        return 'verde'
+    # Verde: RGB (120-240, 140-255, 60-180) - Manzanas frescas y saludables
+    if 120 <= r <= 240 and 140 <= g <= 255 and 60 <= b <= 180:
+        return 'sana'
     
-    # PRIORIDAD 5: Si tiene colores verde-amarillentos (probablemente verde)
-    if g > r and g > b and g > 130:  # Verde dominante con buen nivel
-        return 'verde'
+    # PRIORIDAD 5: Si tiene colores verde-amarillentos (probablemente sana)
+    if g > r and g > b and g > 110:  # Verde dominante con buen nivel (más permisivo)
+        return 'sana'
     
     # PRIORIDAD 6: Si tiene colores claros pero no claramente verde
-    if r > 150 and g > 150 and b > 100:  # Colores claros/bright
-        return 'verde'  # Asumir que es verde si es claro
+    if r > 120 and g > 120 and b > 80:  # Colores claros/bright (más permisivo)
+        return 'sana'  # Asumir que es sana si es claro
     
     # PRIORIDAD 7: Manzanas amarillo-verdosas (como la de la imagen)
-    if r > 180 and g > 180 and b > 120 and g >= r - 20:  # Amarillo-verdoso
-        return 'verde'
+    if r > 140 and g > 140 and b > 90 and g >= r - 30:  # Amarillo-verdoso (más permisivo)
+        return 'sana'
     
     # PRIORIDAD 8: Si tiene colores cálidos pero claros (no marrones)
-    if r > 160 and g > 160 and b > 100 and r + g + b > 450:  # Colores cálidos claros
-        return 'verde'
+    if r > 120 and g > 120 and b > 70 and r + g + b > 350:  # Colores cálidos claros (más permisivo)
+        return 'sana'
     
-    # Por defecto: Solo si es muy oscuro o marrón, es malograda
-    if r < 140 or g < 120 or b < 80:  # Solo si es realmente oscuro
-        return 'malograda'
+    # Por defecto: Si tiene colores oscuros o marrones, es contaminada
+    if r < 130 or g < 110 or b < 80:  # Más estricto para detectar podredumbre
+        return 'contaminada'
     
-    # Si llega aquí, probablemente es verde
-    return 'verde'
+    # Si llega aquí, probablemente es sana
+    return 'sana'
+
+
+def classify_orange_by_color(rgb_color: tuple[int, int, int]) -> str:
+    """
+    Clasificar naranja según su color RGB dominante
+    
+    Args:
+        rgb_color: Color RGB (R, G, B)
+        
+    Returns:
+        str: 'sana' o 'contaminada'
+    """
+    r, g, b = rgb_color
+    
+    # PRIORIDAD 1: Colores muy oscuros/marrones (contaminada)
+    if r < 80 and g < 80 and b < 60:
+        return 'contaminada'
+    
+    # PRIORIDAD 2: Rango específico para naranjas SANAS
+    # Naranja: RGB (200-255, 120-200, 0-100) - Naranjas frescas
+    if 200 <= r <= 255 and 120 <= g <= 200 and 0 <= b <= 100:
+        return 'sana'
+    
+    # PRIORIDAD 3: Naranjas amarillentas (sanas)
+    if r > 180 and g > 100 and b < 80 and r > g:
+        return 'sana'
+    
+    # PRIORIDAD 4: Colores cálidos claros (sanas)
+    if r > 160 and g > 80 and b < 100 and r + g + b > 300:
+        return 'sana'
+    
+    # Por defecto: Si es oscuro, es contaminada
+    if r < 140 or g < 60:
+        return 'contaminada'
+    
+    return 'sana'
+
+
+    
+
+
+def classify_generic_object_by_color(rgb_color: tuple[int, int, int]) -> str:
+    """
+    Clasificación genérica para objetos no específicos
+    
+    Args:
+        rgb_color: Color RGB (R, G, B)
+        
+    Returns:
+        str: 'sana' o 'contaminada'
+    """
+    r, g, b = rgb_color
+    
+    # PRIORIDAD 1: Colores muy oscuros (contaminada)
+    if r < 60 and g < 60 and b < 60:
+        return 'contaminada'
+    
+    # PRIORIDAD 2: Colores claros/vibrantes (sanos)
+    if r > 150 or g > 150 or b > 150:
+        return 'sana'
+    
+    # PRIORIDAD 3: Colores medios (evaluar por brillo total)
+    total_brightness = r + g + b
+    if total_brightness > 300:  # Brillo alto
+        return 'sana'
+    elif total_brightness < 150:  # Brillo bajo
+        return 'contaminada'
+    else:
+        return 'sana'  # Por defecto, asumir sano
 
 
 def get_apple_analysis_details(crop_img: Optional[np.ndarray]) -> dict[str, any]:
@@ -341,7 +767,7 @@ def classify_apple_with_custom_ranges(rgb_color: tuple[int, int, int], color_ran
 
 def analyze_apple_quality_with_logging(crop_img: Optional[np.ndarray]) -> str:
     """
-    Análisis RGB + textura para clasificar manzanas con logging detallado
+    Análisis RGB + textura para clasificar manzanas con logging detallado (COMPATIBILIDAD)
     
     Args:
         crop_img: Imagen recortada de la manzana detectada
@@ -349,36 +775,71 @@ def analyze_apple_quality_with_logging(crop_img: Optional[np.ndarray]) -> str:
     Returns:
         str: 'verde' o 'malograda'
     """
+    result = analyze_object_quality_with_logging(crop_img, "apple")
+    # Convertir resultado nuevo a formato anterior para compatibilidad
+    if result == 'sana':
+        return 'verde'
+    elif result == 'contaminada':
+        return 'malograda'
+    else:
+        return 'indeterminada'
+
+
+def analyze_object_quality_with_logging(crop_img: Optional[np.ndarray], object_class: str = "apple") -> str:
+    """
+    Análisis RGB + textura para clasificar cualquier objeto con logging detallado
+    
+    Args:
+        crop_img: Imagen recortada del objeto detectado
+        object_class: Tipo de objeto ('apple', 'orange', 'sports ball', etc.)
+        
+    Returns:
+        str: 'sana', 'contaminada' o 'indeterminada'
+    """
     if crop_img is None or crop_img.size == 0:
         return 'indeterminada'
     
     # Análisis completo (RGB + textura)
-    result = analyze_apple_quality(crop_img)
+    result = analyze_object_quality(crop_img, object_class)
     
     # Logging detallado con diagnóstico completo
     dominant_color = get_dominant_rgb_color(crop_img)
     texture_analysis = detect_wrinkled_texture(crop_img)
+    hole_analysis = detect_holes_and_cavities(crop_img)
+    contour_analysis = detect_irregular_contours(crop_img)
     
-    if result == 'malograda':
-        # Verificar si fue por arrugas o por color
-        if texture_analysis['is_wrinkled']:
-            print(f"[ARRUGAS] Manzana ARRUGADA detectada (confianza: {texture_analysis['wrinkle_confidence']:.2f})")
+    if result == 'contaminada':
+        # Verificar la causa específica del daño
+        if hole_analysis['has_holes'] and hole_analysis['hole_confidence'] > 0.8:
+            print(f"[HUECOS] {object_class.upper()} CON HUECOS detectado (confianza: {hole_analysis['hole_confidence']:.2f})")
+            print(f"  - RGB: {dominant_color}")
+            print(f"  - Número de huecos: {hole_analysis['hole_count']}")
+            print(f"  - Área del hueco más grande: {hole_analysis['largest_hole_area']:.0f} píxeles")
+            print(f"  - Área relativa del hueco: {hole_analysis['relative_hole_area']:.1%}")
+        elif contour_analysis['is_irregular'] and contour_analysis['irregularity_score'] > 0.5:
+            print(f"[CONTORNOS] {object_class.upper()} CON CONTORNOS IRREGULARES detectado (puntuación: {contour_analysis['irregularity_score']:.2f})")
+            print(f"  - RGB: {dominant_color}")
+            print(f"  - Solidez del contorno: {contour_analysis['contour_solidity']:.3f} (límite: 0.30)")
+            print(f"  - Puntuación de irregularidad: {contour_analysis['irregularity_score']:.3f}")
+        elif texture_analysis['is_wrinkled']:
+            print(f"[ARRUGAS] {object_class.upper()} ARRUGADO detectado (confianza: {texture_analysis['wrinkle_confidence']:.2f})")
             print(f"  - RGB: {dominant_color}")
             print(f"  - Densidad bordes: {texture_analysis['edge_density']:.3f} (límite: 0.08)")
             print(f"  - Variación intensidad: {texture_analysis['intensity_std']:.1f} (límite: 80/100)")
             print(f"  - Gradiente promedio: {texture_analysis['avg_gradient']:.1f} (límite: 30)")
         else:
-            print(f"[COLOR] Manzana MALOGRADA por color RGB: {dominant_color}")
+            print(f"[COLOR] {object_class.upper()} CONTAMINADO por color RGB: {dominant_color}")
             print(f"  - Análisis de color:")
             r, g, b = dominant_color
             print(f"    • R={r}, G={g}, B={b}")
-            print(f"    • Verde dominante: {g == max(r,g,b) and g > 120}")
-            print(f"    • Rango verde: {140 <= r <= 220 and 160 <= g <= 240 and 80 <= b <= 150}")
-            print(f"    • Verde vs otros: {g > r and g > b and g > 130}")
-            print(f"    • Colores claros: {r > 150 and g > 150 and b > 100}")
+            print(f"    • Tipo: {object_class}")
     else:
-        print(f"[VERDE] Manzana VERDE detectada RGB: {dominant_color}")
+        print(f"[SANA] {object_class.upper()} SANA detectada RGB: {dominant_color}")
         print(f"  - Análisis exitoso")
+        if hole_analysis['has_holes']:
+            print(f"  - Nota: Se detectaron {hole_analysis['hole_count']} huecos menores (confianza: {hole_analysis['hole_confidence']:.2f})")
+        if contour_analysis['is_irregular']:
+            print(f"  - Nota: Contornos ligeramente irregulares (solidez: {contour_analysis['contour_solidity']:.3f})")
     
     return result
 

@@ -5,7 +5,7 @@ Visualización de detecciones y configuración de parámetros
 """
 
 import tkinter as tk
-from tkinter import ttk, colorchooser, messagebox
+from tkinter import ttk, messagebox
 import cv2
 from PIL import Image, ImageTk
 import numpy as np
@@ -14,14 +14,14 @@ import time
 import json
 import os
 from ultralytics import YOLO
-from functions.analysys import analyze_chestnut_quality_dual, get_contamination_details
+from functions.analysys import analyze_object_quality_with_logging
 from typing import Dict, Any, Optional
 
 
 class CastañaSerialInterface:
     def __init__(self, root):
         self.root = root
-        self.root.title("CastañaSerial - Interfaz de Control")
+        self.root.title("Detector de Calidad - Interfaz de Control")
         self.root.geometry("1200x800")
         
         # Variables del sistema
@@ -41,28 +41,25 @@ class CastañaSerialInterface:
             'fondo': '#2C3E50'        # Azul oscuro
         }
         
-        # Configuración de clases
-        self.chestnut_classes = ['sports ball', 'apple', 'orange', 'donut', 'bowl', 'carrot', 'banana']
+        # Configuración de clases (se carga desde interface_config.json)
+        self.chestnut_classes = []  # Se cargará desde JSON
         self.detected_objects = {}
+        # Memoria de áreas contaminadas: lista de tuplas (cx, cy, timestamp)
+        self.contaminated_memory = []
         
-        # Configuración de parámetros RGB
-        self.rgb_params = {
-            'brightness_low': 70,
-            'brightness_medium': 100,
-            'variation_threshold': 35.0,
-            'edge_density_threshold': 0.15,
-            'contamination_threshold': 1
-        }
+        # Parámetros RGB manejados automáticamente por functions/analysys.py
         
         # Estadísticas
         self.stats = {
             'total_detections': 0,
             'sanas': 0,
             'contaminadas': 0,
-            'frames_processed': 0
+            'frames_processed': 0,
+            'classes_ignored': 0
         }
         
         self.load_camera_config()
+        self.load_interface_config()
         self.detect_cameras()
         self.setup_ui()
         
@@ -78,13 +75,13 @@ class CastañaSerialInterface:
         top_frame.pack(fill=tk.BOTH, expand=True)
         
         # Panel izquierdo - Video
-        video_frame = ttk.LabelFrame(top_frame, text="Video en Tiempo Real", padding=10)
+        video_frame = ttk.LabelFrame(top_frame, text="Video en Tiempo Real", padding=5)
         video_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         
         self.video_label = ttk.Label(video_frame, text="Cámara no iniciada", 
                                    font=('Arial', 12), foreground='white', 
                                    background=self.colors['fondo'])
-        self.video_label.pack(fill=tk.BOTH, expand=True)
+        self.video_label.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         
         # Panel derecho - Controles
         controls_frame = ttk.LabelFrame(top_frame, text="Controles", padding=10)
@@ -111,21 +108,6 @@ class CastañaSerialInterface:
         # Separador
         ttk.Separator(controls_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
-        # Configuración de colores
-        color_frame = ttk.LabelFrame(controls_frame, text="Configurar Colores", padding=5)
-        color_frame.pack(fill=tk.X, pady=5)
-        
-        self.create_color_controls(color_frame)
-        
-        # Separador
-        ttk.Separator(controls_frame, orient='horizontal').pack(fill=tk.X, pady=10)
-        
-        # Configuración de parámetros RGB
-        params_frame = ttk.LabelFrame(controls_frame, text="Parámetros RGB", padding=5)
-        params_frame.pack(fill=tk.X, pady=5)
-        
-        self.create_rgb_controls(params_frame)
-        
         # Frame inferior - Detecciones y estadísticas
         bottom_frame = ttk.Frame(main_frame)
         bottom_frame.pack(fill=tk.X, pady=(10, 0))
@@ -150,6 +132,40 @@ class CastañaSerialInterface:
                 self.camera_config = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             self.camera_config = None
+    
+    def load_interface_config(self):
+        """Cargar configuración de interfaz desde JSON"""
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "interface_config.json")
+            with open(config_path, 'r', encoding='utf-8') as f:
+                interface_config = json.load(f)
+                
+                # Cargar colores desde configuración
+                if "colors" in interface_config:
+                    self.colors.update(interface_config["colors"])
+                
+                # Cargar clases de detección desde configuración
+                if "detection_classes" in interface_config:
+                    self.chestnut_classes = interface_config["detection_classes"]
+                    print(f"✅ Clases de detección cargadas desde JSON: {self.chestnut_classes}")
+                    
+                    # Verificar que no esté vacío
+                    if not self.chestnut_classes:
+                        print("⚠️  Advertencia: No hay clases de detección en interface_config.json")
+                        self.chestnut_classes = ['apple', 'orange']  # Fallback
+                        print(f"🔄 Usando clases por defecto: {self.chestnut_classes}")
+                else:
+                    print("❌ No se encontraron clases de detección en interface_config.json")
+                    self.chestnut_classes = ['apple', 'orange']  # Fallback
+                    print(f"🔄 Usando clases por defecto: {self.chestnut_classes}")
+                    
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"❌ Error cargando interface_config.json: {e}")
+            print("🔄 Usando configuración por defecto")
+            # Fallback para clases de detección
+            if not self.chestnut_classes:
+                self.chestnut_classes = ['apple', 'orange']
+                print(f"🔄 Clases por defecto: {self.chestnut_classes}")
     
     def get_camera_name(self, cam_id: int) -> str:
         """Obtener nombre personalizado de la cámara"""
@@ -312,84 +328,7 @@ class CastañaSerialInterface:
         except (ValueError, IndexError):
             messagebox.showerror("Error", "Error al procesar selección de cámara")
         
-    def create_color_controls(self, parent):
-        """Crear controles de configuración de colores"""
-        
-        # Color para castañas sanas
-        sana_frame = ttk.Frame(parent)
-        sana_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(sana_frame, text="Castañas Sanas:").pack(side=tk.LEFT)
-        self.sana_color_btn = tk.Button(sana_frame, bg=self.colors['sana'], width=10,
-                                       command=lambda: self.choose_color('sana'))
-        self.sana_color_btn.pack(side=tk.RIGHT)
-        
-        # Color para castañas contaminadas
-        cont_frame = ttk.Frame(parent)
-        cont_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(cont_frame, text="Castañas Contaminadas:").pack(side=tk.LEFT)
-        self.cont_color_btn = tk.Button(cont_frame, bg=self.colors['contaminada'], width=10,
-                                       command=lambda: self.choose_color('contaminada'))
-        self.cont_color_btn.pack(side=tk.RIGHT)
-        
-        # Color para detecciones no confirmadas
-        det_frame = ttk.Frame(parent)
-        det_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(det_frame, text="Detecciones No Confirmadas:").pack(side=tk.LEFT)
-        self.det_color_btn = tk.Button(det_frame, bg=self.colors['detectada'], width=10,
-                                      command=lambda: self.choose_color('detectada'))
-        self.det_color_btn.pack(side=tk.RIGHT)
-        
-    def create_rgb_controls(self, parent):
-        """Crear controles de parámetros RGB"""
-        
-        # Umbral de brillo bajo
-        brightness_low_frame = ttk.Frame(parent)
-        brightness_low_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(brightness_low_frame, text="Brillo Bajo:").pack(side=tk.LEFT)
-        self.brightness_low_var = tk.IntVar(value=self.rgb_params['brightness_low'])
-        self.brightness_low_scale = ttk.Scale(brightness_low_frame, from_=30, to=120, 
-                                            variable=self.brightness_low_var, orient=tk.HORIZONTAL)
-        self.brightness_low_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True)
-        
-        # Umbral de brillo medio
-        brightness_med_frame = ttk.Frame(parent)
-        brightness_med_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(brightness_med_frame, text="Brillo Medio:").pack(side=tk.LEFT)
-        self.brightness_med_var = tk.IntVar(value=self.rgb_params['brightness_medium'])
-        self.brightness_med_scale = ttk.Scale(brightness_med_frame, from_=60, to=150, 
-                                            variable=self.brightness_med_var, orient=tk.HORIZONTAL)
-        self.brightness_med_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True)
-        
-        # Umbral de variación
-        variation_frame = ttk.Frame(parent)
-        variation_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(variation_frame, text="Variación:").pack(side=tk.LEFT)
-        self.variation_var = tk.DoubleVar(value=self.rgb_params['variation_threshold'])
-        self.variation_scale = ttk.Scale(variation_frame, from_=20.0, to=60.0, 
-                                       variable=self.variation_var, orient=tk.HORIZONTAL)
-        self.variation_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True)
-        
-        # Umbral de densidad de bordes
-        edges_frame = ttk.Frame(parent)
-        edges_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(edges_frame, text="Densidad Bordes:").pack(side=tk.LEFT)
-        self.edges_var = tk.DoubleVar(value=self.rgb_params['edge_density_threshold'])
-        self.edges_scale = ttk.Scale(edges_frame, from_=0.05, to=0.30, 
-                                   variable=self.edges_var, orient=tk.HORIZONTAL)
-        self.edges_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True)
-        
-        # Botón para aplicar cambios
-        apply_btn = ttk.Button(parent, text="Aplicar Cambios", 
-                              command=self.apply_rgb_changes)
-        apply_btn.pack(fill=tk.X, pady=5)
-        
+    
     def create_detections_panel(self, parent):
         """Crear panel de detecciones"""
         
@@ -412,8 +351,8 @@ class CastañaSerialInterface:
             ('Cámara Actual:', 'current_camera'),
             ('Frames Procesados:', 'frames_processed'),
             ('Total Detecciones:', 'total_detections'),
-            ('Castañas Sanas:', 'sanas'),
-            ('Castañas Contaminadas:', 'contaminadas')
+            ('Objetos Sanos:', 'sanas'),
+            ('Objetos Contaminados:', 'contaminadas')
         ]
         
         for label_text, key in stats_data:
@@ -432,29 +371,8 @@ class CastañaSerialInterface:
                               command=self.reset_stats)
         reset_btn.pack(fill=tk.X, pady=5)
         
-    def choose_color(self, color_type):
-        """Permitir al usuario elegir un color"""
-        color = colorchooser.askcolor(title=f"Elegir color para {color_type}")[1]
-        if color:
-            self.colors[color_type] = color
-            # Actualizar botón de color
-            if color_type == 'sana':
-                self.sana_color_btn.config(bg=color)
-            elif color_type == 'contaminada':
-                self.cont_color_btn.config(bg=color)
-            elif color_type == 'detectada':
-                self.det_color_btn.config(bg=color)
     
-    def apply_rgb_changes(self):
-        """Aplicar cambios en los parámetros RGB"""
-        self.rgb_params = {
-            'brightness_low': self.brightness_low_var.get(),
-            'brightness_medium': self.brightness_med_var.get(),
-            'variation_threshold': self.variation_var.get(),
-            'edge_density_threshold': self.edges_var.get(),
-            'contamination_threshold': 1  # Fijo por ahora
-        }
-        messagebox.showinfo("Parámetros", "Parámetros RGB actualizados")
+    
     
     def reset_stats(self):
         """Resetear estadísticas"""
@@ -495,6 +413,9 @@ class CastañaSerialInterface:
             # Cargar modelo YOLO
             self.model = YOLO('core/yolo12n.pt')
             
+            # Configurar clases específicas
+            self.configure_yolo_classes()
+            
             # Inicializar cámara con la seleccionada
             self.camera = cv2.VideoCapture(self.camera_id)
             if not self.camera.isOpened():
@@ -517,8 +438,44 @@ class CastañaSerialInterface:
             self.detection_thread.daemon = True
             self.detection_thread.start()
             
+            # Mostrar información de las clases cargadas
+            print(f"🎯 Sistema iniciado con clases: {self.chestnut_classes}")
+            print(f"📋 Clases YOLO disponibles: {list(self.model.names.values())}")
+            print(f"🔍 Solo procesando: {self.chestnut_classes}")
+            
         except Exception as e:
             messagebox.showerror("Error", f"Error al iniciar detección: {str(e)}")
+    
+    def configure_yolo_classes(self):
+        """Configurar YOLO para detectar solo las clases deseadas"""
+        if not self.model:
+            return
+            
+        try:
+            # Obtener todas las clases disponibles en YOLO
+            all_classes = list(self.model.names.values())
+            print(f"📋 Clases YOLO disponibles: {all_classes}")
+            
+            # Encontrar los IDs de las clases que queremos detectar
+            desired_class_ids = []
+            for desired_class in self.chestnut_classes:
+                for class_id, class_name in self.model.names.items():
+                    if class_name.lower() == desired_class.lower():
+                        desired_class_ids.append(class_id)
+                        print(f"✅ Clase encontrada: {class_name} (ID: {class_id})")
+                        break
+                else:
+                    print(f"⚠️  Clase no encontrada en YOLO: {desired_class}")
+            
+            if desired_class_ids:
+                print(f"🎯 Configurando YOLO para detectar solo: {[self.model.names[i] for i in desired_class_ids]}")
+                # Nota: YOLO no permite filtrar clases directamente en la carga del modelo
+                # El filtrado se hace en el procesamiento de resultados
+            else:
+                print("⚠️  No se encontraron clases válidas en YOLO")
+                
+        except Exception as e:
+            print(f"❌ Error configurando clases YOLO: {e}")
     
     def stop_detection(self):
         """Detener detección"""
@@ -537,7 +494,7 @@ class CastañaSerialInterface:
                 if not ret:
                     continue
                 
-                # Realizar detección
+                # Realizar detección con filtrado optimizado
                 results = self.model.predict(frame, conf=0.5)
                 
                 # Procesar resultados
@@ -548,6 +505,13 @@ class CastañaSerialInterface:
                     'detectadas': 0
                 }
                 
+                # Lista para evitar duplicados en la misma área
+                processed_areas = []
+                
+                # Purga de memoria de contaminados (expira a los 3s)
+                now_ts = time.time()
+                self.contaminated_memory = [m for m in self.contaminated_memory if now_ts - m[2] < 3.0]
+                
                 for result in results:
                     if result.boxes is not None:
                         for box in result.boxes:
@@ -555,45 +519,90 @@ class CastañaSerialInterface:
                             class_name = result.names[class_id]
                             confidence = box.conf.item()
                             
+                            # FILTRAR: Solo procesar clases configuradas
+                            if class_name.lower() not in [cls.lower() for cls in self.chestnut_classes]:
+                                # Contar clases ignoradas
+                                self.stats['classes_ignored'] += 1
+                                
+                                # Log de clases ignoradas (solo ocasionalmente para no spamear)
+                                if confidence > 0.7 and self.stats['frames_processed'] % 30 == 0:  # Cada 30 frames
+                                    print(f"🚫 Clase ignorada: {class_name} (confianza: {confidence:.2f}) - No está en configuración")
+                                continue  # Saltar esta detección
+                            
                             x1, y1, x2, y2 = map(int, box.xyxy[0])
+                            
+                            # Verificar si ya procesamos un objeto en esta área (evitar duplicados)
+                            center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                            area_size = (x2 - x1) * (y2 - y1)
+                            
+                            # Buscar si hay otra detección cerca (dentro de 50 píxeles)
+                            is_duplicate = False
+                            for prev_center_x, prev_center_y, prev_area_size in processed_areas:
+                                distance = ((center_x - prev_center_x) ** 2 + (center_y - prev_center_y) ** 2) ** 0.5
+                                if distance < 50:  # Si está muy cerca
+                                    # Mantener la detección con mayor confianza
+                                    if confidence <= 0.7:  # Si la confianza es baja, saltar
+                                        is_duplicate = True
+                                        break
+                            
+                            if is_duplicate:
+                                continue
+                            
+                            # Agregar esta área a las procesadas
+                            processed_areas.append((center_x, center_y, area_size))
                             
                             # Recortar imagen para análisis RGB
                             if x2 > x1 and y2 > y1:
                                 crop_img = frame[y1:y2, x1:x1+(x2-x1)]
                                 
-                                if class_name.lower() in self.chestnut_classes:
-                                    # Análisis RGB
-                                    quality = analyze_chestnut_quality_dual(crop_img)
-                                    
-                                    if quality == 'sana':
-                                        frame_detections['sanas'] += 1
-                                        color = self.colors['sana']
-                                        label = f"SANA: {class_name} ({confidence:.2f})"
-                                    else:
-                                        frame_detections['contaminadas'] += 1
-                                        color = self.colors['contaminada']
-                                        label = f"CONTAMINADA: {class_name} ({confidence:.2f})"
-                                    
-                                    # Dibujar rectángulo
-                                    cv2.rectangle(frame, (x1, y1), (x2, y2), 
-                                                self.hex_to_bgr(color), 3)
-                                    cv2.putText(frame, label, (x1, y1-10), 
-                                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, 
-                                              self.hex_to_bgr(color), 2)
-                                    
-                                    detections_text.append(f"{label} - {time.strftime('%H:%M:%S')}")
+                                # Si área coincide con memoria de contaminados, forzar como contaminada
+                                forced_contaminated = False
+                                for mem_cx, mem_cy, mem_ts in self.contaminated_memory:
+                                    dist_mem = ((center_x - mem_cx) ** 2 + (center_y - mem_cy) ** 2) ** 0.5
+                                    if dist_mem < 60:  # radio de recuerdo
+                                        forced_contaminated = True
+                                        break
+                                
+                                if forced_contaminated:
+                                    quality = 'contaminada'
+                                else:
+                                    # Análisis RGB: forzar reglas de manzana para frutas
+                                    analysis_class = class_name.lower()
+                                    if analysis_class in ['orange']:
+                                        analysis_class = 'apple'
+                                    quality = analyze_object_quality_with_logging(crop_img, analysis_class)
+                                
+                                if quality == 'sana':
+                                    frame_detections['sanas'] += 1
+                                    color = self.colors['sana']
+                                    label = f"SANA ({confidence:.2f})"
+                                elif quality == 'contaminada':
+                                    frame_detections['contaminadas'] += 1
+                                    color = self.colors['contaminada']
+                                    label = f"CONTAMINADA ({confidence:.2f})"
+                                    # Guardar/actualizar memoria de contaminados
+                                    updated = False
+                                    for i, (mem_cx, mem_cy, mem_ts) in enumerate(self.contaminated_memory):
+                                        dist_mem = ((center_x - mem_cx) ** 2 + (center_y - mem_cy) ** 2) ** 0.5
+                                        if dist_mem < 60:
+                                            self.contaminated_memory[i] = (center_x, center_y, now_ts)
+                                            updated = True
+                                            break
+                                    if not updated:
+                                        self.contaminated_memory.append((center_x, center_y, now_ts))
                                 else:
                                     frame_detections['detectadas'] += 1
                                     color = self.colors['detectada']
-                                    label = f"DETECTADA: {class_name} ({confidence:.2f})"
-                                    
-                                    cv2.rectangle(frame, (x1, y1), (x2, y2), 
-                                                self.hex_to_bgr(color), 2)
-                                    cv2.putText(frame, label, (x1, y1-10), 
-                                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, 
-                                              self.hex_to_bgr(color), 1)
-                                    
-                                    detections_text.append(f"{label} - {time.strftime('%H:%M:%S')}")
+                                    label = f"DETECTADA ({confidence:.2f})"
+                                
+                                # Dibujar rectángulo y texto para todas las detecciones
+                                cv2.rectangle(frame, (x1, y1), (x2, y2), 
+                                            self.hex_to_bgr(color), 3)
+                                cv2.putText(frame, label, (x1, y1-10), 
+                                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, 
+                                          self.hex_to_bgr(color), 2)
+                                
+                                detections_text.append(f"{label} - {time.strftime('%H:%M:%S')}")
                 
                 # Actualizar estadísticas
                 self.stats['frames_processed'] += 1
@@ -617,10 +626,37 @@ class CastañaSerialInterface:
     def update_ui(self, frame, detections_text):
         """Actualizar interfaz de usuario"""
         try:
+            # Obtener dimensiones del label de video
+            label_width = self.video_label.winfo_width()
+            label_height = self.video_label.winfo_height()
+            
+            # Si el label aún no tiene dimensiones, usar valores por defecto
+            if label_width <= 1 or label_height <= 1:
+                label_width = 600  # Ancho por defecto
+                label_height = 400  # Alto por defecto
+            
+            # Calcular dimensiones manteniendo la proporción del video
+            frame_height, frame_width = frame.shape[:2]
+            aspect_ratio = frame_width / frame_height
+            
+            # Calcular nuevas dimensiones que se ajusten al espacio disponible
+            if label_width / label_height > aspect_ratio:
+                # El espacio es más ancho que el video, ajustar por altura
+                new_height = label_height - 10  # Margen mínimo
+                new_width = int(new_height * aspect_ratio)
+            else:
+                # El espacio es más alto que el video, ajustar por ancho
+                new_width = label_width - 10  # Margen mínimo
+                new_height = int(new_width / aspect_ratio)
+            
+            # Asegurar dimensiones mínimas
+            new_width = max(new_width, 200)
+            new_height = max(new_height, 150)
+            
             # Actualizar video
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_pil = Image.fromarray(frame_rgb)
-            frame_tk = ImageTk.PhotoImage(frame_pil.resize((400, 300)))
+            frame_tk = ImageTk.PhotoImage(frame_pil.resize((new_width, new_height)))
             
             self.video_label.config(image=frame_tk, text="")
             self.video_label.image = frame_tk  # Mantener referencia
