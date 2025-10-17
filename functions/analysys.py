@@ -19,7 +19,7 @@ def load_interface_config() -> dict:
         
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
-            print(f"✅ Configuración cargada desde: {config_path}")
+            # print(f"✅ Configuración cargada desde: {config_path}")  # Log reducido
             return config
     except (FileNotFoundError, json.JSONDecodeError) as e:
         print(f"❌ Error cargando interface_config.json: {e}")
@@ -38,7 +38,7 @@ def get_detection_classes() -> List[str]:
     """Obtener las clases de detección desde la configuración"""
     config = load_interface_config()
     classes = config.get("detection_classes", ["apple", "orange"])
-    print(f"🎯 Clases de detección disponibles: {classes}")
+    # print(f"🎯 Clases de detección disponibles: {classes}")  # Log reducido
     return classes
 
 
@@ -84,15 +84,17 @@ def analyze_object_quality(crop_img: Optional[np.ndarray], object_class: str = "
     dominant_color = get_dominant_rgb_color(crop_img)
     color_result = classify_object_by_color_and_type(dominant_color, object_class)
     
-    # Debug: Mostrar análisis completo
-    print(f"🔍 DEBUG COMPLETO - {object_class.upper()}:")
-    print(f"  - RGB: {dominant_color}")
-    print(f"  - Resultado color: {color_result}")
-    print(f"  - Huecos: {hole_analysis['has_holes']} (confianza: {hole_analysis['hole_confidence']:.2f}, límite: 0.90)")
-    print(f"  - Contornos: DESHABILITADO")
-    print(f"  - Textura: {texture_analysis['is_wrinkled']} (confianza: {texture_analysis['wrinkle_confidence']:.2f})")
-    print(f"  - Manchas oscuras: {detect_dark_spots(crop_img)} (límite: 35%)")
-    print(f"  - Rayas verticales: {detect_vertical_rot_streaks(crop_img)}")
+    # Debug reducido: Solo mostrar análisis si hay contaminación detectada
+    if color_result in ['contaminada', 'detectada']:
+        print(f"🔍 {object_class.upper()} {color_result.upper()}: RGB {dominant_color}")
+        if hole_analysis['has_holes']:
+            print(f"  - Huecos detectados (confianza: {hole_analysis['hole_confidence']:.2f})")
+        if texture_analysis['is_wrinkled']:
+            print(f"  - Textura arrugada (confianza: {texture_analysis['wrinkle_confidence']:.2f})")
+        if detect_dark_spots(crop_img):
+            print(f"  - Manchas oscuras detectadas")
+        if detect_vertical_rot_streaks(crop_img):
+            print(f"  - Rayas de podredumbre detectadas")
     
     return color_result
 
@@ -226,9 +228,6 @@ def detect_dark_spots(crop_img: np.ndarray) -> bool:
         # Si más del 35% de la imagen son píxeles oscuros, es contaminada (más permisivo)
         has_dark_spots = dark_pixel_ratio > 0.35
         
-        if has_dark_spots:
-            print(f"🔍 MANCHAS OSCURAS detectadas: {dark_pixel_ratio:.1%} de píxeles oscuros")
-        
         return has_dark_spots
         
     except Exception as e:
@@ -284,7 +283,7 @@ def detect_vertical_rot_streaks(crop_img: np.ndarray) -> bool:
                         continue
                     mean_intensity = float(np.mean(stripe_roi))
                     if mean_intensity < 90:  # oscuridad suficiente
-                        print(f"🔍 RAYA VERTICAL de podredumbre detectada: {height_ratio:.1%} de altura, intensidad media {mean_intensity:.1f}")
+                        # print(f"🔍 RAYA VERTICAL de podredumbre detectada: {height_ratio:.1%} de altura, intensidad media {mean_intensity:.1f}")  # Log reducido
                         return True
                     else:
                         # Raya clara: ignorar (reduce falsos positivos)
@@ -811,7 +810,7 @@ def analyze_object_quality_with_logging(crop_img: Optional[np.ndarray], object_c
     if result == 'contaminada':
         # Verificar la causa específica del daño
         if hole_analysis['has_holes'] and hole_analysis['hole_confidence'] > 0.8:
-            print(f"[HUECOS] {object_class.upper()} CON HUECOS detectado (confianza: {hole_analysis['hole_confidence']:.2f})")
+            # print(f"[HUECOS] {object_class.upper()} CON HUECOS detectado (confianza: {hole_analysis['hole_confidence']:.2f})")  # Log reducido
             print(f"  - RGB: {dominant_color}")
             print(f"  - Número de huecos: {hole_analysis['hole_count']}")
             print(f"  - Área del hueco más grande: {hole_analysis['largest_hole_area']:.0f} píxeles")
