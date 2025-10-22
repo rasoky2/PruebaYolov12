@@ -1,23 +1,28 @@
-import os
 import json
-from typing import Optional, Any
+import os
+from typing import Any
+
 from utils.logger import (
-    info, success, warning, error,
-    detection_info, detection_error,
-    yolo_info, title
+    detection_error,
+    detection_info,
+    error,
+    info,
+    title,
+    warning,
+    yolo_info,
 )
 
 # Variables globales (ahora manejadas por interface.py)
 
-def load_camera_config() -> Optional[dict[str, Any]]:
+
+def load_camera_config() -> dict[str, Any] | None:
     """Cargar configuración de cámaras desde JSON"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, "camera_config.json")
-    
+
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        return config
+        with open(config_path, encoding='utf-8') as f:
+            return json.load(f)
     except FileNotFoundError:
         warning("Archivo camera_config.json no encontrado. Usando configuración por defecto.")
         return None
@@ -25,25 +30,29 @@ def load_camera_config() -> Optional[dict[str, Any]]:
         error("Error al leer camera_config.json. Usando configuración por defecto.")
         return None
 
-def get_camera_name(cam_id: int, config: Optional[dict[str, Any]]) -> str:
+
+def get_camera_name(cam_id: int, config: dict[str, Any] | None) -> str:
     """Obtener nombre personalizado de la cámara"""
     if config and "cameras" in config and str(cam_id) in config["cameras"]:
         return config["cameras"][str(cam_id)]["name"]
     return f"Dispositivo {cam_id}"
 
-def get_camera_description(cam_id: int, config: Optional[dict[str, Any]]) -> str:
+
+def get_camera_description(cam_id: int, config: dict[str, Any] | None) -> str:
     """Obtener descripción de la cámara"""
     if config and "cameras" in config and str(cam_id) in config["cameras"]:
         return config["cameras"][str(cam_id)].get("description", "")
     return ""
 
-def is_favorite_camera(cam_id: int, config: Optional[dict[str, Any]]) -> bool:
+
+def is_favorite_camera(cam_id: int, config: dict[str, Any] | None) -> bool:
     """Verificar si la cámara es favorita"""
     if config and "cameras" in config and str(cam_id) in config["cameras"]:
         return config["cameras"][str(cam_id)].get("is_favorite", False)
     return False
 
-def get_favorite_camera(config: Optional[dict[str, Any]]) -> Optional[int]:
+
+def get_favorite_camera(config: dict[str, Any] | None) -> int | None:
     """Obtener la cámara favorita"""
     if config and "cameras" in config:
         for cam_id, cam_info in config["cameras"].items():
@@ -53,6 +62,7 @@ def get_favorite_camera(config: Optional[dict[str, Any]]) -> Optional[int]:
 
 # Todas las funciones de detección y análisis movidas a interface.py
 
+
 def main_func():
     """Función principal para detección de manzanas con interfaz gráfica"""
     title("Detector de Manzanas - YOLO12n + Análisis RGB")
@@ -61,7 +71,7 @@ def main_func():
     detection_error("Método: YOLO12n detecta clase 'apple' → Análisis RGB + Textura")
     yolo_info("Clases detectadas: apple, orange (para manzanas arrugadas)")
     info("Análisis: RGB + detección de arrugas (bordes y textura)")
-    
+
     # Cargar interfaz gráfica (OBLIGATORIO)
     try:
         info("Iniciando interfaz gráfica...")
@@ -77,6 +87,6 @@ def main_func():
         error("La interfaz gráfica es obligatoria. Verifica la instalación.")
         return
 
+
 if __name__ == "__main__":
     main_func()
-

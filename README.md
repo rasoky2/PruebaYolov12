@@ -55,11 +55,9 @@ python show_demo.py
 
 ## 🎯 Controles
 
-- **ESC**: Salir
-- **'c'**: Cambiar confianza de detección
-- **'s'**: Guardar captura
-- **'m'**: Cambiar cámara
-- **'o'**: Optimización manual de memoria
+- **Interfaz Gráfica**: Todos los controles se manejan a través de la interfaz gráfica
+- **Botones**: Iniciar/Detener detección, cambiar cámara, configurar parámetros
+- **Mouse**: Dibujar línea de activación haciendo clic y arrastrando
 
 ## 📁 Estructura del Proyecto
 

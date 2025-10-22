@@ -2,9 +2,10 @@
 Widget para manejo de Arduino y comunicación serial
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
 import time
+import tkinter as tk
+from tkinter import messagebox, ttk
+
 from arduino.arduino_manager import ArduinoManager
 
 
@@ -12,26 +13,26 @@ class ArduinoPanel:
     def __init__(self, parent):
         self.parent = parent
         self.arduino_manager = ArduinoManager()
-        
+
         # Variables UI
         self.arduino_ports = []
         self.arduino_port_var = tk.StringVar()
-        
+
         # UI Elements
         self.arduino_combo = None
         self.arduino_connect_btn = None
         self.arduino_disconnect_btn = None
         self.arduino_status_label = None
         self.arduino_last_signal_label = None
-        
+
         self.create_ui()
         self.refresh_arduino_ports()
-    
+
     def create_ui(self):
         """Crear interfaz del panel de Arduino"""
         arduino_frame = ttk.LabelFrame(self.parent, text="Arduino", padding=5)
         arduino_frame.pack(fill=tk.X, pady=5)
-        
+
         # Fila selector de puerto
         row1 = ttk.Frame(arduino_frame)
         row1.pack(fill=tk.X, pady=2)
@@ -130,12 +131,12 @@ class ArduinoPanel:
                 pass
         else:
             messagebox.showwarning("Arduino", "No se pudo enviar la señal (posible limitación de frecuencia)")
-    
+
     def send_signal(self, signal: str, delay_prevention: float = 0.3):
         """Enviar señal al Arduino"""
         if not self.arduino_manager.enabled:
             return False
-        
+
         sent = self.arduino_manager.send_signal(signal, delay_prevention)
         if sent:
             try:
@@ -144,11 +145,11 @@ class ArduinoPanel:
             except Exception:
                 pass
         return sent
-    
+
     def is_connected(self):
         """Verificar si Arduino está conectado"""
         return self.arduino_manager.enabled
-    
+
     def get_manager(self):
         """Obtener el manager de Arduino"""
         return self.arduino_manager

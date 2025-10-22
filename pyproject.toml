@@ -1,0 +1,5 @@
+[tool.ruff]
+select = ["F", "E", "W", "I", "B", "UP", "C4", "B", "RET"]
+ignore = ["W293", "E501"]  # ignora líneas largas
+
+# ruff check . --fix

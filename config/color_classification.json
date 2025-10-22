@@ -1,0 +1,208 @@
+{
+  "apple": {
+    "sana": {
+      "description": "Manzanas verdes frescas y saludables",
+      "ranges": [
+        {
+          "name": "verde_dominante",
+          "condition": "g == max_channel && g > 100",
+          "priority": 1
+        },
+        {
+          "name": "verde_fresco",
+          "r_min": 120,
+          "r_max": 240,
+          "g_min": 140,
+          "g_max": 255,
+          "b_min": 60,
+          "b_max": 180,
+          "priority": 2
+        },
+        {
+          "name": "verde_amarillento",
+          "condition": "g > r && g > b && g > 110",
+          "priority": 3
+        },
+        {
+          "name": "colores_claros",
+          "r_min": 120,
+          "r_max": 255,
+          "g_min": 120,
+          "g_max": 255,
+          "b_min": 80,
+          "b_max": 255,
+          "priority": 4
+        },
+        {
+          "name": "amarillo_verdoso",
+          "r_min": 140,
+          "r_max": 255,
+          "g_min": 140,
+          "g_max": 255,
+          "b_min": 90,
+          "b_max": 255,
+          "condition": "g >= r - 30",
+          "priority": 5
+        },
+        {
+          "name": "colores_calidos_claros",
+          "r_min": 120,
+          "r_max": 255,
+          "g_min": 120,
+          "g_max": 255,
+          "b_min": 70,
+          "b_max": 255,
+          "condition": "r + g + b > 350",
+          "priority": 6
+        }
+      ]
+    },
+    "contaminada": {
+      "description": "Manzanas dañadas, podridas o con defectos",
+      "ranges": [
+        {
+          "name": "colores_muy_oscuros",
+          "r_max": 100,
+          "g_max": 100,
+          "b_max": 80,
+          "priority": 1
+        },
+        {
+          "name": "colores_marrones",
+          "r_max": 140,
+          "g_max": 120,
+          "b_max": 90,
+          "priority": 2
+        },
+        {
+          "name": "manchas_marrones",
+          "r_max": 120,
+          "g_max": 100,
+          "b_max": 70,
+          "priority": 3
+        },
+        {
+          "name": "colores_oscuros_generales",
+          "r_max": 130,
+          "g_max": 110,
+          "b_max": 80,
+          "priority": 4
+        }
+      ]
+    }
+  },
+  "orange": {
+    "sana": {
+      "description": "Naranjas frescas y saludables",
+      "ranges": [
+        {
+          "name": "naranja_fresca",
+          "r_min": 200,
+          "r_max": 255,
+          "g_min": 120,
+          "g_max": 200,
+          "b_min": 0,
+          "b_max": 100,
+          "priority": 1
+        },
+        {
+          "name": "naranja_amarillenta",
+          "r_min": 180,
+          "r_max": 255,
+          "g_min": 100,
+          "g_max": 255,
+          "b_max": 80,
+          "condition": "r > g",
+          "priority": 2
+        },
+        {
+          "name": "colores_calidos_claros",
+          "r_min": 160,
+          "r_max": 255,
+          "g_min": 80,
+          "g_max": 255,
+          "b_max": 100,
+          "condition": "r + g + b > 300",
+          "priority": 3
+        }
+      ]
+    },
+    "contaminada": {
+      "description": "Naranjas dañadas o podridas",
+      "ranges": [
+        {
+          "name": "colores_muy_oscuros",
+          "r_max": 80,
+          "g_max": 80,
+          "b_max": 60,
+          "priority": 1
+        },
+        {
+          "name": "colores_oscuros_generales",
+          "r_max": 140,
+          "g_max": 60,
+          "priority": 2
+        }
+      ]
+    }
+  },
+  "generic": {
+    "sana": {
+      "description": "Objetos genéricos sanos",
+      "ranges": [
+        {
+          "name": "colores_vibrantes",
+          "r_min": 150,
+          "g_min": 150,
+          "b_min": 150,
+          "priority": 1
+        },
+        {
+          "name": "brillo_alto",
+          "condition": "r + g + b > 300",
+          "priority": 2
+        }
+      ]
+    },
+    "contaminada": {
+      "description": "Objetos genéricos contaminados",
+      "ranges": [
+        {
+          "name": "colores_muy_oscuros",
+          "r_max": 60,
+          "g_max": 60,
+          "b_max": 60,
+          "priority": 1
+        },
+        {
+          "name": "brillo_bajo",
+          "condition": "r + g + b < 150",
+          "priority": 2
+        }
+      ]
+    }
+  },
+  "thresholds": {
+    "dark_spots": {
+      "threshold": 120,
+      "ratio_threshold": 0.35
+    },
+    "vertical_rot_streaks": {
+      "threshold": 110,
+      "height_ratio_min": 0.20,
+      "intensity_max": 90,
+      "area_min": 25
+    },
+    "wrinkled_texture": {
+      "edge_density_min": 0.08,
+      "intensity_std_min": 80,
+      "avg_gradient_min": 30,
+      "edge_density_alt": 0.12,
+      "intensity_std_alt": 100
+    },
+    "holes": {
+      "area_ratio_min": 0.40,
+      "confidence_multiplier": 5
+    }
+  }
+}
