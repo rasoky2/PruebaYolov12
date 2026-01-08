@@ -53,12 +53,19 @@ def extract_classes(model_path):
         classes_dict = model.names
         print(f"Clases detectadas: {classes_dict}")
 
-        # Crear estructura enriquecida con español
+        # Crear estructura enriquecida con español y calidad
         enhanced_classes = {}
         for class_id, class_name in classes_dict.items():
+            cn_lower = class_name.lower()
+            
+            # Determinar calidad sugerida
+            bad_keywords = ["bad", "rot", "canker", "blackspot", "greening", "mold", "stale", "damaged", "bruised", "wrinkled", "overripe"]
+            quality = "contaminada" if any(kw in cn_lower for kw in bad_keywords) else "sana"
+            
             enhanced_classes[class_id] = {
                 "name": class_name,
-                "es": TRANSLATIONS.get(class_name, class_name) # Fallback al nombre original
+                "es": TRANSLATIONS.get(cn_lower, class_name), # Usar cn_lower para mayor coincidencia
+                "quality": quality
             }
         
         # Ruta de salida: mismo directorio que el modelo

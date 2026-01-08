@@ -1,22 +1,27 @@
 {
-    "0": {
-        "name": "overripe",
-        "es": "Muy Maduro"
-    },
-    "1": {
-        "name": "raw",
-        "es": "Crudo"
-    },
-    "2": {
-        "name": "ripe",
-        "es": "Maduro"
-    },
-    "3": {
-        "name": "rotten",
-        "es": "Podrido"
-    },
-    "4": {
-        "name": "unripe",
-        "es": "Verde"
-    }
+  "0": {
+    "name": "overripe",
+    "es": "Muy Maduro",
+    "quality": "contaminada"
+  },
+  "1": {
+    "name": "raw",
+    "es": "Crudo",
+    "quality": "sana"
+  },
+  "2": {
+    "name": "ripe",
+    "es": "Maduro",
+    "quality": "sana"
+  },
+  "3": {
+    "name": "rotten",
+    "es": "Podrido",
+    "quality": "contaminada"
+  },
+  "4": {
+    "name": "unripe",
+    "es": "Verde (Inmaduro)",
+    "quality": "sana"
+  }
 }

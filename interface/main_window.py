@@ -439,7 +439,7 @@ class CastañaSerialInterface(QMainWindow):
                     quality_key = "sana"
                     if confidence >= self.quality_confidence_threshold and area >= self.quality_area_threshold:
                          try:
-                              quality_result = self.analyze_object_quality(frame, x1, y1, x2, y2, center_x, center_y, class_name)
+                              quality_result = self.analyze_object_quality(frame, x1, y1, x2, y2, center_x, center_y, class_name, str(class_id))
                               if quality_result.lower() in self.quality_display_map:
                                    quality_key = quality_result.lower()
                          except: pass
@@ -468,14 +468,21 @@ class CastañaSerialInterface(QMainWindow):
 
         return detections_text, frame_detections, None, detection_records
 
-    def analyze_object_quality(self, frame, x1, y1, x2, y2, cx, cy, class_name):
-        # Filtrado espacial para evitar duplicados cercanos a contaminados
+    def analyze_object_quality(self, frame, x1, y1, x2, y2, cx, cy, class_name, class_id=None):
+        # 1. Prioridad: Configuración manual en classes.json
+        if class_id and class_id in self.class_translations:
+            manual_quality = self.class_translations[class_id].get("quality")
+            if manual_quality:
+                return manual_quality.lower()
+
+        # 2. Filtrado espacial para evitar duplicados cercanos a contaminados
         for mem_cx, mem_cy, _ in self.contaminated_memory:
              dist = ((cx - mem_cx)**2 + (cy - mem_cy)**2)**0.5
              if dist < 60: return "contaminada"
 
+        # 3. Fallback: Análisis por palabras clave
         cn_lower = class_name.lower()
-        bad_keywords = ["bad", "rot", "orange", "canker", "blackspot", "greening", "mold", "stale"]
+        bad_keywords = ["bad", "rot", "orange", "canker", "blackspot", "greening", "mold", "stale", "damaged", "bruised", "wrinkled", "overripe"]
         if any(kw in cn_lower for kw in bad_keywords):
              return "contaminada"
         return "sana"

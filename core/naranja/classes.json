@@ -1,18 +1,22 @@
 {
-    "0": {
-        "name": "blackspot",
-        "es": "Mancha Negra"
-    },
-    "1": {
-        "name": "canker",
-        "es": "Cancrosis (Cancro)"
-    },
-    "2": {
-        "name": "fresh",
-        "es": "Fresco"
-    },
-    "3": {
-        "name": "greening",
-        "es": "Greening (HLB)"
-    }
+  "0": {
+    "name": "blackspot",
+    "es": "Mancha Negra",
+    "quality": "contaminada"
+  },
+  "1": {
+    "name": "canker",
+    "es": "Cancrosis (Cancro)",
+    "quality": "contaminada"
+  },
+  "2": {
+    "name": "fresh",
+    "es": "Fresco",
+    "quality": "sana"
+  },
+  "3": {
+    "name": "greening",
+    "es": "Greening (HLB)",
+    "quality": "contaminada"
+  }
 }
