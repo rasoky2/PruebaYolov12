@@ -1,12 +1,12 @@
 {
-  "0": {
-    "name": "fresh_apple",
-    "es": "Manzana Fresca",
-    "quality": "sana"
-  },
-  "1": {
-    "name": "rotten_apple",
-    "es": "Manzana Podrida",
-    "quality": "contaminada"
-  }
+    "0": {
+        "name": "fresh_apple",
+        "es": "Manzana Fresca",
+        "quality": "sana"
+    },
+    "1": {
+        "name": "rotten_apple",
+        "es": "Manzana Podrida",
+        "quality": "contaminada"
+    }
 }
