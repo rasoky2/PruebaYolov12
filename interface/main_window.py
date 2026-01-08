@@ -165,11 +165,12 @@ class CastañaSerialInterface(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(16, 8, 16, 16)
+        main_layout.setSpacing(8)
 
         # Header
         header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
         title = QLabel("Detector de Calidad")
         title.setObjectName("Title")
         header.addWidget(title)

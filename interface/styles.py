@@ -4,7 +4,7 @@ STYLES = """
 QMainWindow, QWidget {
     background-color: #FFFFFF;
     color: #09090b;
-    font-family: "Segoe UI", "Inter", sans-serif;
+    font-family: "Inter", "Segoe UI", sans-serif;
 }
 
 /* Tipografía */
