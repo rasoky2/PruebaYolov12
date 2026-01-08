@@ -232,10 +232,8 @@ class CastañaSerialInterface(QMainWindow):
                     self.colors.update(interface_config["colors"])
                 if "detection_classes" in interface_config:
                     self.chestnut_classes = interface_config["detection_classes"]
-                if not self.chestnut_classes:
-                     self.chestnut_classes = ["apple", "orange"]
         except Exception:
-             self.chestnut_classes = ["apple", "orange"]
+             self.chestnut_classes = []
 
     def on_camera_changed(self, camera_id: int, camera_info: dict):
         self.log_window.log(f"Cámara cambiada a ID {camera_id}: {camera_info.get('name')}")
@@ -331,6 +329,11 @@ class CastañaSerialInterface(QMainWindow):
     def configure_yolo_classes(self):
         if not self.model: return
         self.chestnut_class_ids = []
+        if not self.chestnut_classes:
+            # Si no hay filtro, usar todas las clases del modelo
+            self.chestnut_class_ids = list(self.model.names.keys())
+            return
+
         for desired_class in self.chestnut_classes:
             for class_id, class_name in self.model.names.items():
                 if class_name.lower() == desired_class.lower():
@@ -400,13 +403,18 @@ class CastañaSerialInterface(QMainWindow):
                 time.sleep(0.1)
 
     def run_detection(self, frame):
-        # ... logic ...
-        return self.model.predict(frame, verbose=False) # Simplified for test
+        """Ejecutar detección con parámetros optimizados"""
+        if not self.model: return []
+        return self.model.predict(source=frame, conf=0.6, iou=0.45, verbose=False)
 
     def process_detections(self, results, frame):
         detections_text = []
         frame_detections = {"sanas": 0, "contaminadas": 0}
         detection_records = []
+        
+        # Obtener dimensiones del frame para filtrado
+        vh, vw = frame.shape[:2]
+        max_box_area = (vw * vh) * 0.85 # Ignorar cuadros que cubran >85% de la pantalla (ruido)
         
         if len(self.spatial_grid.grid) > 100:
              self.spatial_grid.clear()
@@ -417,12 +425,21 @@ class CastañaSerialInterface(QMainWindow):
             if result.boxes is not None:
                 for box in result.boxes:
                     class_id = int(box.cls[0])
+                    # Filtrar por IDs configurados (Sistemas expertos)
+                    if class_id not in self.chestnut_class_ids:
+                        continue
+
                     class_name = result.names[class_id]
                     confidence = box.conf.item()
                     
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
                     area = (x2 - x1) * (y2 - y1)
+                    
+                    # Filtrar ruido de fondo (cuadros gigantescos)
+                    if area > max_box_area:
+                        continue
+                        
+                    center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
                     
                     if self.spatial_grid.is_duplicate(center_x, center_y, confidence):
                         continue
