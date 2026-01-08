@@ -168,20 +168,6 @@ class CastañaSerialInterface(QMainWindow):
         main_layout.setContentsMargins(16, 8, 16, 16)
         main_layout.setSpacing(8)
 
-        # Header
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        title = QLabel("Detector de Calidad")
-        title.setObjectName("Title")
-        header.addWidget(title)
-        
-        subtitle = QLabel("YOLO12n + Análisis RGB")
-        subtitle.setObjectName("Subtitle")
-        header.addWidget(subtitle)
-        header.addStretch()
-        
-        main_layout.addLayout(header)
-
         # Top Section (Video + Controls)
         top_splitter = QSplitter(Qt.Orientation.Horizontal)
         top_splitter.setHandleWidth(1)

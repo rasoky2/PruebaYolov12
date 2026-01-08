@@ -1,121 +1,74 @@
-# 🥜 Detector de Castañas con YOLO12n
+# 🍎 Sistema de Inspección de Calidad de Frutas
 
-Sistema de detección y clasificación de castañas brasileñas usando inteligencia artificial.
+Sistema de detección y clasificación de calidad para **Plátanos, Manzanas y Naranjas** utilizando Inteligencia Artificial (YOLO) y análisis de imagen.
 
 ## 📋 Características
 
-- **Detección en tiempo real** con YOLO12n
-- **Interfaz Gráfica Completa** con tkinter para visualización y control
-- **Análisis RGB directo** para clasificación de calidad (SANA vs CONTAMINADA)
-- **Control de Arduino** para automatización
-- **Interfaz de cámara múltiple** con configuración personalizable
-- **Demo Interactivo** sin necesidad de cámara real
+- **Sistemas Expertos por Fruta**: Modelos especializados para detectar estados de madurez y enfermedades específicas.
+- **Detección en tiempo real**: Procesamiento fluido con YOLOv12.
+- **Interfaz Premium (Shadcn Light)**: Diseño moderno, limpio y minimalista basado en el estándar Shadcn.
+- **Traducción Automática**: Todas las clases detectadas se muestran en español gracias a un sistema de mapeo JSON.
+- **Selección Inteligente**: Carga automática del modelo y configuración según la fruta seleccionada.
+- **Detección de Enfermedades**: Identifica Cancrosis, Mancha Negra, HLB, Moho, Podredumbre, entre otros.
 
 ## 🚀 Instalación
 
 1. Instala las dependencias:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Ejecuta el sistema:
+2. Ejecuta la aplicación principal:
+
 ```bash
-# Demo interactivo (sin cámara)
-python demo_interface.py
-
-# Interfaz gráfica completa
-python interface.py
-
-# Sistema principal (consola)
 python main.py
-
-# Menú de demostración
-python show_demo.py
 ```
 
 ## 📊 Funcionalidades
 
-### Interfaz Gráfica
-- **Visualización en tiempo real** de detecciones
-- **Configuración de colores** personalizable
-- **Selección de cámara** con información detallada
-- **Estadísticas en vivo** de detecciones y calidad
-- **Panel de detecciones** con historial
+### Interfaz de Control
 
-### Detección de Castañas
-- Clasificación automática: **Sanas** vs **Contaminadas**
-- Análisis RGB directo: brillo, variación, densidad de bordes
-- Detección de clases: sports ball, apple, orange, donut, bowl, carrot, banana
+- **Selector de Fruta**: Cambia entre Plátano, Manzana y Naranja instantáneamente.
+- **Visualización en Vivo**: Video en tiempo real con etiquetas traducidas y estados de calidad.
+- **Gestión de Cámara**: Selección de dispositivos con información de resolución y FPS.
+- **Sistema de Logs**: Registro interno de eventos y errores (ahora oculto para una interfaz más limpia).
 
+### Clasificación de Calidad
 
-### Control de Hardware
-- **Arduino Integration**: Control de servos para separación automática
-- **Múltiples Cámaras**: Soporte para hasta 5 dispositivos
-- **Configuración JSON**: Cámaras favoritas personalizables
-
-## 🎯 Controles
-
-- **Interfaz Gráfica**: Todos los controles se manejan a través de la interfaz gráfica
-- **Botones**: Iniciar/Detener detección, cambiar cámara, configurar parámetros
-- **Mouse**: Dibujar línea de activación haciendo clic y arrastrando
+- **Sana**: Fruta fresca, madura o apta para consumo.
+- **Contaminada**: Detecta enfermedades, daños físicos o estados de descomposición.
+- **Traducciones incluidas**:
+  - _Plátano_: Maduro, Verde, Podrido, Pasado.
+  - _Manzana_: Fresca, Podrida.
+  - _Naranja_: HLB (Greening), Cancrosis, Mancha Negra.
 
 ## 📁 Estructura del Proyecto
 
 ```
-├── main.py                    # Sistema principal (consola)
-├── interface.py               # Interfaz gráfica completa
-├── demo_interface.py          # Demo interactivo (sin cámara)
-├── show_demo.py              # Menú de demostración
-├── run_with_interface.py     # Ejecutor unificado
-├── requirements.txt           # Dependencias Python
-├── camera_config.json        # Configuración de cámaras
-├── interface_config.json     # Configuración de interfaz
-├── functions/
-│   ├── __init__.py
-│   └── analysys.py          # Análisis RGB y clasificación
-├── core/
-│   └── yolo12n.pt           # Modelo YOLO12n
-└── arduino/
-    ├── __init__.py
-    └── arduino_manager.py    # Control de Arduino
+├── main.py                    # Punto de entrada de la aplicación
+├── extract_classes.py         # Herramienta para generar JSON de clases y traducciones
+├── core/                      # Modelos de IA
+│   ├── platano/               # Modelo y clases para plátanos
+│   ├── manzana/               # Modelo y clases para manzanas
+│   └── naranja/               # Modelo y clases para naranjas
+├── interface/                 # Componentes de la Interfaz Gráfica (PyQt6)
+│   ├── main_window.py         # Ventana principal y lógica de UI
+│   ├── controls_panel.py      # Panel de selección de fruta
+│   └── styles.py              # Definición de estética Shadcn Light (Inter font)
+└── utils/                     # Utilidades de logging y sistema
 ```
 
-## 🔧 Configuración
+## 🔧 Herramientas Útiles
 
-### Cámaras
-Edita `camera_config.json` para personalizar tus dispositivos:
-```json
-{
-    "cameras": {
-        "0": {
-            "name": "Cámara Principal",
-            "description": "Webcam integrada",
-            "is_favorite": true
-        },
-        "1": {
-            "name": "Cámara Externa",
-            "description": "Cámara USB externa",
-            "is_favorite": false
-        }
-    }
-}
+### Generador de Clases (`extract_classes.py`)
+
+Puedes usar este script para extraer las clases de cualquier nuevo modelo `.pt` y generar automáticamente su archivo de traducciones:
+
+```bash
+python extract_classes.py ruta/al/modelo.pt
 ```
 
-### Interfaz Gráfica
-Configura colores y parámetros en `interface_config.json`:
-```json
-{
-    "colors": {
-        "sana": "#00FF00",
-        "contaminada": "#FF0000",
-        "no_confirmada": "#FFFF00"
-    },
-    "rgb_thresholds": {
-        "brightness_threshold_low": 70,
-        "brightness_threshold_medium": 100,
-        "variation_threshold": 35,
-        "edge_density_threshold": 0.15,
-        "contamination_threshold": 1
-    }
-}
-```
+## 🎨 Estética
+
+La interfaz utiliza la fuente **Inter** y una paleta de colores basada en **Shadcn Light** (Zinc), proporcionando una experiencia de usuario de nivel profesional y alto contraste.
