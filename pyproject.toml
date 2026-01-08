@@ -1,5 +1,94 @@
 [tool.ruff]
-select = ["F", "E", "W", "I", "B", "UP", "C4", "B", "RET"]
-ignore = ["W293", "E501"]  # ignora líneas largas
+# Configuración específica
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Reglas de calidad de código - CONFIGURACIÓN LIMPIA Y FUNCIONAL
+select = [
+    # Errores básicos
+    "F",      # Pyflakes - errores de sintaxis
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "I",      # isort - orden de imports
+    "B",      # flake8-bugbear - bugs comunes
+    "UP",     # pyupgrade - actualizar sintaxis
+    "C4",     # flake8-comprehensions - comprehensions
+    "RET",    # flake8-return - returns
+    "SIM",    # flake8-simplify - simplificaciones
+    "ARG",    # flake8-unused-arguments - argumentos no usados
+    "PIE",    # flake8-pie - mejoras de código
+    "PL",     # pylint - reglas de pylint
+    "Q",      # flake8-quotes - comillas consistentes
+    "RUF",    # ruff - reglas específicas de ruff
+    "S",      # flake8-bandit - seguridad
+    "T20",    # flake8-print - detectar prints
+    "ERA",    # eradicate - código comentado
+    "PD",     # pandas-vet - pandas
+    "PGH",    # pygrep-hooks - hooks
+    "PT",     # flake8-pytest-style - pytest
+    "PYI",    # flake8-pyi - archivos .pyi
+    "TID",    # flake8-tidy-imports - imports
+    "INT",    # flake8-gettext - gettext
+    "ICN",    # flake8-import-conventions
+    "G",      # flake8-logging-format
+    "INP",    # flake8-no-pep420
+    "A",      # flake8-builtins
+    "COM",    # flake8-commas
+    "C90",    # mccabe - complejidad
+    "DJ",     # flake8-django
+    "EM",     # flake8-errmsg
+    "EXE",    # flake8-executable
+    "FA",     # flake8-future-annotations
+    "ISC",    # flake8-implicit-str-concat
+    "RSE",    # flake8-raise
+    "SLF",    # flake8-self
+    "SLOT",   # flake8-slots
+    "PTH",    # flake8-use-pathlib
+    "TD",     # flake8-todos
+    "FIX",    # flake8-fixme
+    "LOG",    # flake8-logging
+]
+
+# Reglas a ignorar (específicas para tu proyecto)
+ignore = [
+    "W293",   # línea en blanco sin espacios
+    "E501",   # línea demasiado larga
+    "B008",   # no usar argumentos por defecto mutables
+    "B006",   # no usar argumentos por defecto mutables
+    "PLR0913", # demasiados argumentos (para funciones de UI)
+    "PLR0912", # demasiados branches (para lógica compleja)
+    "PLR0915", # demasiados statements (para funciones largas)
+    "C901",   # función demasiado compleja
+    "W191",   # indentación con tabs
+    "E203",   # espacio antes de ':'
+    "B904",   # raise sin from (para compatibilidad)
+    "PLR2004", # magic value (para constantes de UI)
+    "S101",   # uso de assert (para tests)
+    "T20",    # print statements (para logging)
+    "G004",   # logging-fstring-interpolation
+]
+
+# Configuración de imports
+[tool.ruff.lint.isort]
+known-first-party = ["functions", "interface", "utils", "arduino"]
+force-single-line = false
+lines-after-imports = 2
+
+# Configuración de mccabe (complejidad)
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+# Configuración de pyupgrade
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
+
+# Configuración de flake8-bugbear
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["tuple", "frozenset"]
+
+# Configuración de flake8-bandit
+[tool.ruff.lint.flake8-bandit]
+check-typed-exception = true
 
 # ruff check . --fix

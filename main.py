@@ -1,7 +1,6 @@
 import json
 import os
 from typing import Any
-
 from utils.logger import (
     detection_error,
     detection_info,
@@ -12,22 +11,95 @@ from utils.logger import (
     yolo_info,
 )
 
-# Variables globales (ahora manejadas por interface.py)
+# Patrón singleton para YOLO (Context7 best practice)
+class YOLOModelManager:
+    """Gestor singleton para modelos YOLO - Optimización Context7"""
+    _instance = None
+    _model = None
+    _model_path = None
+    _config_manager = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def _get_config_manager(self):
+        """Obtener gestor de configuración"""
+        if self._config_manager is None:
+            from functions.config_manager import get_config_manager
+            self._config_manager = get_config_manager()
+        return self._config_manager
+    
+    def get_model(self, model_path: str = None):
+        """Obtener modelo YOLO con carga optimizada desde configuración"""
+        if model_path is None:
+            # Usar configuración del JSON
+            config_manager = self._get_config_manager()
+            yolo_config = config_manager.get_yolo_config()
+            model_path = yolo_config.get("selected_model", "yolo12n.pt")
+        
+        if self._model is None or self._model_path != model_path:
+            try:
+                from ultralytics import YOLO
+                self._model = YOLO(model_path, task="detect")
+                self._model_path = model_path
+                info(f"Modelo YOLO cargado: {model_path}")
+            except ImportError as e:
+                error(f"Error cargando YOLO: {e}")
+                return None
+        return self._model
+    
+    def predict_optimized(self, source, conf=None, iou=None, imgsz=None):
+        """Predicción optimizada con parámetros desde configuración JSON"""
+        if self._model is None:
+            return None
+        
+        # Obtener parámetros desde configuración si no se especifican
+        if conf is None or iou is None or imgsz is None:
+            config_manager = self._get_config_manager()
+            yolo_config = config_manager.get_yolo_config()
+            conf = conf or yolo_config.get("confidence_threshold", 0.75)
+            iou = iou or yolo_config.get("iou_threshold", 0.45)
+            imgsz = imgsz or yolo_config.get("image_size", 640)
+        
+        try:
+            results = self._model.predict(
+                source=source,
+                conf=conf,
+                iou=iou,
+                imgsz=imgsz,
+                save=False,
+                verbose=False
+            )
+            return results
+        except Exception as e:
+            error(f"Error en predicción YOLO: {e}")
+            return None
+
+
+# Instancia global del gestor YOLO
+yolo_manager = YOLOModelManager()
 
 
 def load_camera_config() -> dict[str, Any] | None:
-    """Cargar configuración de cámaras desde JSON"""
+    """Cargar configuración de cámaras desde interface_config.json"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "camera_config.json")
+    config_path = os.path.join(script_dir, "interface_config.json")
 
     try:
-        with open(config_path, encoding='utf-8') as f:
-            return json.load(f)
+        with open(config_path, encoding="utf-8") as f:
+            config = json.load(f)
+            # Extraer solo la configuración de cámaras
+            return {
+                "cameras": config.get("cameras", {}),
+                "settings": config.get("settings", {}),
+            }
     except FileNotFoundError:
-        warning("Archivo camera_config.json no encontrado. Usando configuración por defecto.")
+        warning("Archivo interface_config.json no encontrado. Usando configuración por defecto.")
         return None
     except json.JSONDecodeError:
-        error("Error al leer camera_config.json. Usando configuración por defecto.")
+        error("Error al leer interface_config.json. Usando configuración por defecto.")
         return None
 
 
@@ -72,21 +144,16 @@ def main_func():
     yolo_info("Clases detectadas: apple, orange (para manzanas arrugadas)")
     info("Análisis: RGB + detección de arrugas (bordes y textura)")
 
-    # Cargar interfaz gráfica (OBLIGATORIO)
+    # Cargar interfaz gráfica (PyQt6)
     try:
-        info("Iniciando interfaz gráfica...")
+        info("Iniciando interfaz gráfica (PyQt6)...")
         import interface
         interface.main()
-        return
-    except ImportError as e:
-        error(f"ERROR CRÍTICO: No se pudo cargar interfaz gráfica: {e}")
-        error("La interfaz gráfica es obligatoria. Verifica que tkinter esté instalado.")
-        return
     except Exception as e:
         error(f"ERROR CRÍTICO: Error en interfaz gráfica: {e}")
-        error("La interfaz gráfica es obligatoria. Verifica la instalación.")
+        import traceback
+        traceback.print_exc()
         return
-
 
 if __name__ == "__main__":
     main_func()

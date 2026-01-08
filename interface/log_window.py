@@ -1,221 +1,165 @@
 """
-Ventana separada para mostrar logs del sistema
-Mejora el rendimiento al no escribir constantemente a la terminal
+Ventana separada para mostrar logs del sistema - PyQt6 Version
 """
 
 import threading
 import time
-import tkinter as tk
 from collections import deque
-from tkinter import filedialog, scrolledtext, ttk
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+    QTextEdit, QCheckBox, QLabel, QFileDialog, QStyle
+)
+from PyQt6.QtCore import pyqtSignal, QObject, Qt
+from PyQt6.QtGui import QTextCursor, QColor
 
 
-class LogWindow:
-    def __init__(self, parent: tk.Widget):
-        self.parent = parent
-        self.root = None  # Se establecerá con set_root_reference
-        self.log_window = None
-        self.log_text = None
-        self.log_buffer = deque(maxlen=1000)  # Buffer circular de 1000 líneas
+class LogWindowSignals(QObject):
+    log_received = pyqtSignal(str, str)
+
+
+class LogWindow(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("Logs del Sistema")
+        self.resize(800, 500)
+        # Style inherited from main app via qApp, or can force if needed
+        # self.setStyleSheet("background-color: #FFFFFF; color: #09090b;") # Handled by global
+
+        self.signals = LogWindowSignals()
+        self.signals.log_received.connect(self.append_log)
+
+        self.log_buffer = deque(maxlen=1000)
         self.log_lock = threading.Lock()
-        self.auto_scroll = True
+        
+        self.setup_ui()
+        self.is_visible = False
 
-        # Crear botón para abrir logs
-        self.create_log_button()
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Controls Frame
+        controls_layout = QHBoxLayout()
+        
+        # Buttons
+        self.btn_clear = QPushButton(" Limpiar")
+        self.btn_clear.setObjectName("Secondary")
+        self.btn_clear.clicked.connect(self.clear_logs)
+        
+        self.btn_save = QPushButton(" Guardar")
+        self.btn_save.setObjectName("Secondary")
+        self.btn_save.clicked.connect(self.save_logs)
+        
+        controls_layout.addWidget(self.btn_clear)
+        controls_layout.addWidget(self.btn_save)
+        
+        # Auto-scroll
+        self.chk_autoscroll = QCheckBox("Auto-scroll")
+        self.chk_autoscroll.setChecked(True)
+        controls_layout.addWidget(self.chk_autoscroll)
+        
+        controls_layout.addStretch()
+        
+        # Line count
+        self.lbl_lines = QLabel("Líneas: 0")
+        controls_layout.addWidget(self.lbl_lines)
+        
+        layout.addLayout(controls_layout)
+        
+        # Text Area
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)
+        # Stylesheet is handled globally, but we might want specifics for colors
+        # The global one sets generic text edit style.
+        layout.addWidget(self.text_edit)
 
-    def create_log_button(self):
-        """Crear botón para abrir ventana de logs"""
-        self.log_button = ttk.Button(
-            self.parent,
-            text="📋 Abrir Logs",
-            command=self.toggle_log_window,
-            width=12
-        )
-        self.log_button.pack(side=tk.RIGHT, padx=(5, 0))
-
-    def toggle_log_window(self):
-        """Abrir o cerrar ventana de logs"""
-        if self.log_window is None or not self.log_window.winfo_exists():
-            self.open_log_window()
+    def toggle_visibility(self):
+        if self.isVisible():
+            self.hide()
+            self.is_visible = False
         else:
-            self.close_log_window()
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self.is_visible = True
 
-    def open_log_window(self):
-        """Abrir ventana de logs"""
-        self.log_window = tk.Toplevel(self.parent)
-        self.log_window.title("Logs del Sistema - CastañaSerial")
-        self.log_window.geometry("800x500")
-        self.log_window.configure(bg='#2C3E50')
-
-        # Configurar cierre de ventana
-        self.log_window.protocol("WM_DELETE_WINDOW", self.close_log_window)
-
-        # Frame principal
-        main_frame = ttk.Frame(self.log_window)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        # Frame de controles
-        controls_frame = ttk.Frame(main_frame)
-        controls_frame.pack(fill=tk.X, pady=(0, 10))
-
-        # Botones de control
-        ttk.Button(controls_frame, text="🗑️ Limpiar", command=self.clear_logs).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(controls_frame, text="💾 Guardar", command=self.save_logs).pack(side=tk.LEFT, padx=(0, 5))
-
-        # Checkbox auto-scroll
-        self.auto_scroll_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(controls_frame, text="Auto-scroll", variable=self.auto_scroll_var).pack(side=tk.LEFT, padx=(10, 0))
-
-        # Contador de líneas
-        self.line_count_label = ttk.Label(controls_frame, text="Líneas: 0")
-        self.line_count_label.pack(side=tk.RIGHT)
-
-        # Área de texto para logs
-        self.log_text = scrolledtext.ScrolledText(
-            main_frame,
-            wrap=tk.WORD,
-            font=('Consolas', 9),
-            bg='#1E1E1E',
-            fg='#FFFFFF',
-            insertbackground='white',
-            selectbackground='#404040',
-            height=25
-        )
-        self.log_text.pack(fill=tk.BOTH, expand=True)
-
-        # Configurar colores para diferentes tipos de logs
-        self.setup_text_tags()
-
-        # Cargar logs existentes del buffer
-        self.load_existing_logs()
-
-        # Cambiar texto del botón
-        self.log_button.config(text="📋 Cerrar Logs")
-
-        print("📋 Ventana de logs abierta")
-
-    def setup_text_tags(self):
-        """Configurar etiquetas de color para diferentes tipos de logs"""
-        self.log_text.tag_configure("INFO", foreground="#00FF00")      # Verde
-        self.log_text.tag_configure("WARNING", foreground="#FFA500")   # Naranja
-        self.log_text.tag_configure("ERROR", foreground="#FF0000")     # Rojo
-        self.log_text.tag_configure("DEBUG", foreground="#00FFFF")     # Cian
-        self.log_text.tag_configure("YOLO", foreground="#FFFF00")      # Amarillo
-        self.log_text.tag_configure("ARDUINO", foreground="#FF69B4")   # Rosa
-        self.log_text.tag_configure("CAMERA", foreground="#87CEEB")    # Azul claro
-        self.log_text.tag_configure("DEFAULT", foreground="#FFFFFF")   # Blanco
-
-    def close_log_window(self):
-        """Cerrar ventana de logs"""
-        if self.log_window:
-            self.log_window.destroy()
-            self.log_window = None
-            self.log_text = None
-            self.log_button.config(text="📋 Abrir Logs")
-            print("📋 Ventana de logs cerrada")
-
-    def log(self, message: str, level: str = "INFO") -> None:
-        """Agregar mensaje al log"""
+    def log(self, message: str, level: str = "INFO"):
+        """Thread-safe logging method"""
         timestamp = time.strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] [{level}] {message}"
-
-        # Agregar al buffer
+        
         with self.log_lock:
             self.log_buffer.append((log_entry, level))
+            
+        self.signals.log_received.emit(log_entry, level)
 
-        # Actualizar ventana si está abierta
-        if self.log_window and self.log_text and hasattr(self, 'root'):
-            self.root.after(0, self._update_log_display, log_entry, level)
+    def append_log(self, text, level):
+        """Append log to text edit (runs in main thread via signal)"""
+        color = self.get_log_color(level)
+        formatted_text = f'<span style="color:{color}">{text}</span>'
+        
+        self.text_edit.append(formatted_text)
+        
+        if self.chk_autoscroll.isChecked():
+            self.text_edit.moveCursor(QTextCursor.MoveOperation.End)
+            
+        # Update counter
+        # Rough estimate of lines based on blocks
+        lines = self.text_edit.document().blockCount()
+        self.lbl_lines.setText(f"Líneas: {lines}")
+        
+        # Limit lines (simple check)
+        if lines > 2000:
+            cursor = self.text_edit.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            for _ in range(1000):
+                cursor.movePosition(QTextCursor.MoveOperation.NextBlock, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
 
-    def _update_log_display(self, log_entry: str, level: str) -> None:
-        """Actualizar display de logs en el hilo principal"""
-        if not self.log_text:
-            return
-
-        # Determinar tag de color
-        tag = LogWindow.get_log_tag(level)
-
-        # Insertar texto
-        self.log_text.insert(tk.END, log_entry + "\n", tag)
-
-        # Auto-scroll si está habilitado
-        if self.auto_scroll_var.get():
-            self.log_text.see(tk.END)
-
-        # Actualizar contador
-        line_count = int(self.log_text.index('end-1c').split('.')[0])
-        self.line_count_label.config(text=f"Líneas: {line_count}")
-
-        # Limitar líneas si es necesario
-        if line_count > 2000:
-            self.log_text.delete("1.0", "1000.0")
-
-    @staticmethod
-    def get_log_tag(level: str) -> str:
-        """Obtener tag de color basado en el nivel"""
+    def get_log_color(self, level):
         level_upper = level.upper()
         if "ERROR" in level_upper or "❌" in level:
-            return "ERROR"
+            return "#ef4444"  # Red 500
         if "WARNING" in level_upper or "⚠️" in level:
-            return "WARNING"
-        if "YOLO" in level_upper or "0:" in level:
-            return "YOLO"
-        if "ARDUINO" in level_upper or "CONTAMINADO" in level_upper or "SANO" in level_upper:
-            return "ARDUINO"
-        if "CAMERA" in level_upper or "🔄" in level:
-            return "CAMERA"
-        if "DEBUG" in level_upper or "🔍" in level:
-            return "DEBUG"
-        if "INFO" in level_upper or "✅" in level:
-            return "INFO"
-        return "DEFAULT"
+            return "#f97316"  # Orange 500
+        if "YOLO" in level_upper:
+            return "#eab308"  # Yellow 500 range (formatted for light bg might need darker) -> #ca8a04
+        if "CAMERA" in level_upper:
+            return "#0ea5e9"  # Sky Blue
+        if "DEBUG" in level_upper:
+            return "#6366f1"  # Indigo
+        if "INFO" in level_upper:
+            return "#10b981"  # Emerald
+        return "#18181b"      # Zinc 900
 
     def load_existing_logs(self):
-        """Cargar logs existentes del buffer"""
-        if not self.log_text:
-            return
-
+        self.text_edit.clear()
         with self.log_lock:
             for log_entry, level in self.log_buffer:
-                tag = LogWindow.get_log_tag(level)
-                self.log_text.insert(tk.END, log_entry + "\n", tag)
-
-        if self.auto_scroll_var.get():
-            self.log_text.see(tk.END)
+                self.append_log(log_entry, level)
 
     def clear_logs(self):
-        """Limpiar todos los logs"""
-        if self.log_text:
-            self.log_text.delete("1.0", tk.END)
-
+        self.text_edit.clear()
         with self.log_lock:
             self.log_buffer.clear()
-
-        self.line_count_label.config(text="Líneas: 0")
-        self.log("Logs limpiados", "INFO")
+        self.lbl_lines.setText("Líneas: 0")
 
     def save_logs(self):
-        """Guardar logs a archivo"""
-        try:
-            filename = filedialog.asksaveasfilename(
-                defaultextension=".txt",
-                filetypes=[("Archivos de texto", "*.txt"), ("Todos los archivos", "*.*")],
-                title="Guardar logs"
-            )
-
-            if filename:
-                with open(filename, 'w', encoding='utf-8') as f:
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Guardar logs", "", "Archivos de texto (*.txt);;Todos los archivos (*)"
+        )
+        
+        if filename:
+            try:
+                with open(filename, "w", encoding="utf-8") as f:
                     with self.log_lock:
                         for log_entry, _ in self.log_buffer:
                             f.write(log_entry + "\n")
-
                 self.log(f"Logs guardados en: {filename}", "INFO")
-        except Exception as e:
-            self.log(f"Error guardando logs: {e}", "ERROR")
+            except Exception as e:
+                self.log(f"Error guardando logs: {e}", "ERROR")
 
     def set_root_reference(self, root):
-        """Establecer referencia al root para after()"""
-        self.root = root
+        pass # Not needed in PyQt6 logic as we use signals
 
 
 # Instancia global para capturar prints
@@ -226,30 +170,3 @@ def setup_global_logging(log_window):
     """Configurar logging global para capturar prints"""
     global _log_window_instance
     _log_window_instance = log_window
-
-
-def log_print(*args, **kwargs):
-    """Función de reemplazo para print() que también envía a la ventana de logs"""
-    # Llamar al print original
-    print(*args, **kwargs)
-
-    # Enviar también a la ventana de logs si está disponible
-    if _log_window_instance and _log_window_instance.log_window:
-        message = " ".join(str(arg) for arg in args)
-        level = "INFO"
-
-        # Determinar nivel basado en el contenido
-        if "❌" in message or "ERROR" in message.upper():
-            level = "ERROR"
-        elif "⚠️" in message or "WARNING" in message.upper():
-            level = "WARNING"
-        elif "🔍" in message or "DEBUG" in message.upper():
-            level = "DEBUG"
-        elif "YOLO" in message.upper() or "0:" in message:
-            level = "YOLO"
-        elif "ARDUINO" in message.upper() or "CONTAMINADO" in message.upper() or "SANO" in message.upper():
-            level = "ARDUINO"
-        elif "🔄" in message or "CAMERA" in message.upper():
-            level = "CAMERA"
-
-        _log_window_instance.log(message, level)

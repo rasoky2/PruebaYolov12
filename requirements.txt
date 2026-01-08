@@ -9,7 +9,8 @@ matplotlib
 pyyaml
 tqdm
 colorama
-pyserial
 scikit-image
 scipy
 psutil
+PyQt6
+qtawesome

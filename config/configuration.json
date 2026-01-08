@@ -1,0 +1,62 @@
+{
+  "yolo_model": {
+    "selected_model": "yolo12x.pt",
+    "confidence_threshold": 0.75,
+    "iou_threshold": 0.45,
+    "image_size": 640,
+    "save_predictions": false,
+    "verbose": false
+  },
+  "camera_settings": {
+    "selected_camera_id": 0,
+    "resolution": "1280x720",
+    "fps": 30,
+    "auto_exposure": true,
+    "brightness": 0,
+    "contrast": 0,
+    "saturation": 0
+  },
+  "processing_settings": {
+    "render_every_n_frames": 1,
+    "line_detection_radius_px": 50,
+    "memory_cleanup_interval": 100,
+    "performance_monitoring": true
+  },
+  "detection_settings": {
+    "detection_classes": ["apple", "orange"],
+    "min_confidence": 0.5,
+    "max_detections_per_frame": 10,
+    "tracking_enabled": true,
+    "cross_line_detection": true
+  },
+  "ui_settings": {
+    "show_confidence_scores": true,
+    "show_detection_boxes": true,
+    "show_classification_labels": true,
+    "color_scheme": "default",
+    "log_level": "INFO"
+  },
+  "analysis_settings": {
+    "rgb_analysis_enabled": true,
+    "texture_analysis_enabled": true,
+    "hole_detection_enabled": true,
+    "dark_spot_detection_enabled": true,
+    "wrinkle_detection_enabled": true,
+    "rot_streak_detection_enabled": true
+  },
+  "performance_settings": {
+    "max_memory_usage_mb": 3000,
+    "restart_interval_s": 300,
+    "cleanup_threshold": 0.8,
+    "optimization_level": "high"
+  },
+  "backup_settings": {
+    "auto_backup": true,
+    "backup_interval_hours": 24,
+    "max_backups": 7,
+    "backup_path": "backups/"
+  },
+  "version": "1.0.0",
+  "last_updated": "2024-01-01T00:00:00Z",
+  "description": "Configuración principal del sistema CastañaSerial"
+}

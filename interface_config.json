@@ -1,12 +1,28 @@
 {
     "colors": {
         "sana": "#00FF00",
-        "contaminada": "#FF0000", 
-        "detectada": "#FFFF00",
+        "contaminada": "#FF0000",
         "fondo": "#2C3E50"
     },
     "detection_classes": [
         "apple", 
         "orange"
-    ]
+    ],
+    "cameras": {
+        "0": {
+            "name": "Cámara Principal",
+            "description": "Webcam integrada o principal",
+            "is_favorite": false
+        },
+        "1": {
+            "name": "Cámara Externa",
+            "description": "Cámara USB externa",
+            "is_favorite": true
+        }
+    },
+    "settings": {
+        "default_favorite": true,
+        "show_descriptions": true,
+        "auto_select_favorite": false
+    }
 }

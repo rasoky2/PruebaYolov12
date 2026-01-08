@@ -7,6 +7,7 @@ from datetime import datetime
 
 from colorama import Fore, Style, init
 
+
 # Inicializar colorama para Windows
 init(autoreset=True)
 
@@ -78,11 +79,7 @@ class CastanaLogger:
             formatted = self._format_message(message, f"{Fore.LIGHTRED_EX}[CHESTNUT]{Style.RESET_ALL}", component)
             print(formatted)
 
-    def arduino(self, message: str):
-        """Mensaje específico para Arduino (cian)"""
-        if self.enabled:
-            formatted = self._format_message(message, f"{Fore.CYAN}[ARDUINO]{Style.RESET_ALL}")
-            print(formatted)
+
 
     def filter_info(self, message: str):
         """Mensaje específico para filtros (verde claro)"""
@@ -119,33 +116,16 @@ warning = castana_logger.warning
 error = castana_logger.error
 debug = castana_logger.debug
 critical = castana_logger.critical
-chestnut = castana_logger.chestnut
-arduino = castana_logger.arduino
-filter_info = castana_logger.filter_info
+
 camera = castana_logger.camera
 performance = castana_logger.performance
 yolo = castana_logger.yolo
+chestnut = castana_logger.chestnut
+
 
 
 # Funciones helper para componentes específicos
-def arduino_info(message: str):
-    """Información de Arduino"""
-    arduino(f"{message}")
 
-
-def arduino_ok(message: str):
-    """Éxito de Arduino"""
-    arduino(f"{message}")
-
-
-def arduino_error(message: str):
-    """Error de Arduino"""
-    arduino(f"{message}")
-
-
-def arduino_warning(message: str):
-    """Advertencia de Arduino"""
-    arduino(f"{message}")
 
 
 def detection_info(message: str):
